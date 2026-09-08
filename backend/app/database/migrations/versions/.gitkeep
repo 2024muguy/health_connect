@@ -1,0 +1,3 @@
+# This directory contains migration version files.
+# Each migration file is named: <revision>_<description>.py
+# Example: 001_create_patients_table.py

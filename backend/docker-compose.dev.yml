@@ -1,0 +1,49 @@
+# ============================================
+# HealthConnect AI - Development Docker Compose
+# ============================================
+# Development-specific overrides
+# ============================================
+
+version: '3.8'
+
+services:
+  app:
+    environment:
+      ENVIRONMENT: development
+      DEBUG: "true"
+      LOG_LEVEL: DEBUG
+    volumes:
+      - .:/app
+      - /app/__pycache__
+      - /app/.pytest_cache
+    command: >
+      uvicorn app.main:app
+      --host 0.0.0.0
+      --port 8000
+      --reload
+      --reload-dir /app
+      --log-level debug
+    ports:
+      - "8000:8000"
+
+  worker:
+    environment:
+      ENVIRONMENT: development
+      DEBUG: "true"
+      LOG_LEVEL: DEBUG
+    volumes:
+      - .:/app
+      - /app/__pycache__
+    command: >
+      celery -A app.core.celery_app worker
+      --loglevel=debug
+      --concurrency=2
+
+  notebook:
+    volumes:
+      - ./notebooks:/app/notebooks
+      - ./data:/app/data
+      - ./training:/app/training
+      - ./scripts:/app/scripts
+      - ./config:/app/config
+      - .:/app/src

@@ -1,0 +1,119 @@
+# ============================================
+# Docker Ignore File
+# ============================================
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Environment
+.env
+.env.local
+.env.production
+.env.staging
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.whl
+.eggs/
+*.egg
+
+# Virtual Environment
+venv/
+env/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Testing
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# Data Files (will be mounted separately)
+data/raw/*
+data/processed/*
+data/models/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/models/.gitkeep
+
+# Logs
+logs/
+*.log
+*.log.*
+nohup.out
+
+# Docker
+docker-compose.override.yml
+.docker/
+Dockerfile*
+docker-compose*.yml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Documentation (not needed in container)
+docs/
+reports/
+screenshots/
+
+# Monitoring (mounted separately)
+monitoring/
+
+# Notebooks (mounted separately)
+notebooks/
+*.ipynb
+
+# ML Models
+*.h5
+*.hdf5
+*.pb
+*.pkl
+*.joblib
+*.onnx
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# Temporary
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+
+# Security
+*.key
+*.pem
+*.crt
+*.p12
+credentials.json
+service-account.json

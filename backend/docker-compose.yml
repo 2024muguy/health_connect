@@ -1,0 +1,311 @@
+# ============================================
+# HealthConnect AI - Docker Compose Configuration
+# ============================================
+# Main configuration for all services
+# ============================================
+
+version: '3.8'
+
+# ============================================
+# Networks
+# ============================================
+networks:
+  healthconnect-network:
+    name: healthconnect-network
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+# ============================================
+# Volumes
+# ============================================
+volumes:
+  redis_data:
+    name: healthconnect-redis-data
+  prometheus_data:
+    name: healthconnect-prometheus-data
+  grafana_data:
+    name: healthconnect-grafana-data
+  app_data:
+    name: healthconnect-app-data
+  logs_data:
+    name: healthconnect-logs-data
+
+# ============================================
+# Services
+# ============================================
+services:
+  # ============================================
+  # FastAPI Application
+  # ============================================
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: healthconnect-app
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # Neon DB
+      NEON_DATABASE_URL: ${NEON_DATABASE_URL}
+      DATABASE_POOL_SIZE: ${DATABASE_POOL_SIZE:-20}
+      DATABASE_MAX_OVERFLOW: ${DATABASE_MAX_OVERFLOW:-10}
+      # LLM Providers
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4}
+      OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-3-opus-20240229}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
+      GOOGLE_MODEL: ${GOOGLE_MODEL:-gemini-pro}
+      # Vector Database
+      PINECONE_API_KEY: ${PINECONE_API_KEY}
+      PINECONE_ENVIRONMENT: ${PINECONE_ENVIRONMENT}
+      PINECONE_INDEX_NAME: ${PINECONE_INDEX_NAME:-healthconnect-rag}
+      # Redis
+      REDIS_URL: redis://redis:6379
+      # App Settings
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      DEBUG: ${DEBUG:-false}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SECRET_KEY: ${SECRET_KEY}
+      APP_NAME: ${APP_NAME:-HealthConnect AI Assistant}
+      APP_VERSION: ${APP_VERSION:-1.0.0}
+      API_PREFIX: ${API_PREFIX:-/api/v1}
+      # RAG Settings
+      CHUNK_SIZE: ${CHUNK_SIZE:-512}
+      CHUNK_OVERLAP: ${CHUNK_OVERLAP:-77}
+      TOP_K_RETRIEVAL: ${TOP_K_RETRIEVAL:-5}
+      # Safety Settings
+      SAFETY_THRESHOLD: ${SAFETY_THRESHOLD:-0.7}
+      # Rate Limiting
+      RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
+      RATE_LIMIT_REQUESTS: ${RATE_LIMIT_REQUESTS:-100}
+      RATE_LIMIT_PERIOD: ${RATE_LIMIT_PERIOD:-60}
+      # Monitoring
+      PROMETHEUS_ENABLED: ${PROMETHEUS_ENABLED:-true}
+    volumes:
+      - app_data:/app/data
+      - logs_data:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+    networks:
+      - healthconnect-network
+
+  # ============================================
+  # Redis Cache
+  # ============================================
+  redis:
+    image: redis:7-alpine
+    container_name: healthconnect-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - healthconnect-network
+
+  # ============================================
+  # Celery Worker
+  # ============================================
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: healthconnect-worker
+    restart: unless-stopped
+    environment:
+      NEON_DATABASE_URL: ${NEON_DATABASE_URL}
+      REDIS_URL: redis://redis:6379
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      PINECONE_API_KEY: ${PINECONE_API_KEY}
+      PINECONE_ENVIRONMENT: ${PINECONE_ENVIRONMENT}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SECRET_KEY: ${SECRET_KEY}
+    volumes:
+      - app_data:/app/data
+      - logs_data:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "celery", "-A", "app.core.celery_app", "inspect", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+    networks:
+      - healthconnect-network
+
+  # ============================================
+  # Jupyter Notebook
+  # ============================================
+  notebook:
+    build:
+      context: .
+      dockerfile: Dockerfile.notebook
+    container_name: healthconnect-notebook
+    restart: unless-stopped
+    ports:
+      - "8888:8888"
+    environment:
+      NEON_DATABASE_URL: ${NEON_DATABASE_URL}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      PINECONE_API_KEY: ${PINECONE_API_KEY}
+      PINECONE_ENVIRONMENT: ${PINECONE_ENVIRONMENT}
+      REDIS_URL: redis://redis:6379
+    volumes:
+      - ./notebooks:/app/notebooks
+      - ./data:/app/data
+      - ./training:/app/training
+      - ./scripts:/app/scripts
+      - ./config:/app/config
+    command: >
+      jupyter notebook
+      --ip=0.0.0.0
+      --port=8888
+      --allow-root
+      --no-browser
+      --NotebookApp.token=''
+      --NotebookApp.password=''
+      --NotebookApp.disable_check_xsrf=True
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8888/api"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 8G
+        reservations:
+          cpus: '1.0'
+          memory: 2G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - healthconnect-network
+
+  # ============================================
+  # Prometheus Monitoring
+  # ============================================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: healthconnect-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - healthconnect-network
+
+  # ============================================
+  # Grafana Dashboards
+  # ============================================
+  grafana:
+    image: grafana/grafana:latest
+    container_name: healthconnect-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel,grafana-worldmap-panel
+    volumes:
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - healthconnect-network

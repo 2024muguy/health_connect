@@ -1,0 +1,61 @@
+# ============================================
+# HealthConnect AI - Worker Dockerfile
+# ============================================
+# Celery worker for background tasks
+# ============================================
+
+# ============================================
+# Stage 1: Builder
+# ============================================
+FROM python:3.11-slim as builder
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# ============================================
+# Stage 2: Production Image
+# ============================================
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    ENVIRONMENT=production
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    libpq5 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+COPY . .
+
+RUN useradd -m -u 1000 appuser && \
+    chown -R appuser:appuser /app && \
+    mkdir -p /app/data/processed /app/logs && \
+    chown -R appuser:appuser /app/data /app/logs
+
+USER appuser
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD celery -A app.core.celery_app inspect ping || exit 1
+
+CMD ["celery", "-A", "app.core.celery_app", "worker", "--loglevel=info", "--concurrency=4", "--max-tasks-per-child=1000", "--time-limit=300", "--soft-time-limit=240"]

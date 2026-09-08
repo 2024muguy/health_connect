@@ -1,0 +1,82 @@
+# ============================================
+# HealthConnect AI - Prometheus Configuration
+# ============================================
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  scrape_timeout: 10s
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+      scheme: http
+      timeout: 10s
+
+# Rule files
+rule_files:
+  - "alerts.yml"
+
+# Scrape configurations
+scrape_configs:
+  # Self monitoring
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # FastAPI application
+  - job_name: "healthconnect-app"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["app:8000"]
+        labels:
+          service: "healthconnect-api"
+          environment: "production"
+
+  # Redis monitoring
+  - job_name: "redis"
+    static_configs:
+      - targets: ["redis:6379"]
+        labels:
+          service: "redis-cache"
+
+  # Grafana monitoring
+  - job_name: "grafana"
+    static_configs:
+      - targets: ["grafana:3000"]
+        labels:
+          service: "grafana"
+
+# Alert rules
+alerting_rules:
+  groups:
+    - name: healthconnect_alerts
+      rules:
+        - alert: HighResponseTime
+          expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 2
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High response time detected"
+            description: "95th percentile response time is above 2 seconds"
+
+        - alert: HighErrorRate
+          expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) > 0.05
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "High error rate detected"
+            description: "Error rate is above 5%"
+
+        - alert: ServiceDown
+          expr: up{job="healthconnect-app"} == 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "HealthConnect app is down"
+            description: "The application has been unreachable for 1 minute"

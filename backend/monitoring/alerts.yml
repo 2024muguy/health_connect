@@ -1,0 +1,83 @@
+# ============================================
+# HealthConnect AI - Alert Rules
+# ============================================
+
+groups:
+  - name: healthconnect_critical
+    rules:
+      # Application down
+      - alert: AppDown
+        expr: up{job="healthconnect-app"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          team: devops
+        annotations:
+          summary: "HealthConnect API is down"
+          description: "The application has been unreachable for more than 1 minute"
+
+      # High latency
+      - alert: HighLatency
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 3
+        for: 5m
+        labels:
+          severity: warning
+          team: devops
+        annotations:
+          summary: "High API latency"
+          description: "95th percentile latency is above 3 seconds"
+
+      # High error rate
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          team: devops
+        annotations:
+          summary: "High error rate"
+          description: "Error rate exceeds 5% over 5 minutes"
+
+  - name: healthconnect_warning
+    rules:
+      # Slow responses
+      - alert: SlowResponses
+        expr: rate(http_request_duration_seconds_sum[5m]) / rate(http_request_duration_seconds_count[5m]) > 1.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Slow average response time"
+          description: "Average response time exceeds 1.5 seconds"
+
+      # Rate limiting triggered
+      - alert: RateLimitingActive
+        expr: rate(http_requests_total{status="429"}[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Rate limiting active"
+          description: "Multiple rate limit responses detected"
+
+      # Redis connection issues
+      - alert: RedisConnectionIssues
+        expr: redis_connected_clients < 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis connection issues"
+          description: "Redis has no connected clients"
+
+  - name: healthconnect_info
+    rules:
+      # Low activity
+      - alert: LowActivity
+        expr: rate(http_requests_total[1h]) < 1
+        for: 6h
+        labels:
+          severity: info
+        annotations:
+          summary: "Low system activity"
+          description: "Less than 1 request per hour for 6 hours"
