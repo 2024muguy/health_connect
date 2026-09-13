@@ -25,6 +25,7 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
   const [formError, setFormError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -41,12 +42,15 @@ export default function LoginPage() {
       return;
     }
 
+    setSubmitting(true);
     try {
       await login({ email: email.trim(), password });
       toast('Welcome back!', 'success');
       router.push('/dashboard');
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'Login failed. Please try again.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -156,11 +160,11 @@ export default function LoginPage() {
 
             <LoadingButton
               type="submit"
-              loading={isLoading}
+              loading={submitting}
               fullWidth
               className="h-[46px]"
             >
-              {isLoading ? 'Signing in…' : 'Sign in'}
+              {submitting ? 'Signing in…' : 'Sign in'}
             </LoadingButton>
           </form>
 

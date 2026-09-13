@@ -223,6 +223,11 @@ class HybridRetriever:
         # Get keyword results
         keyword_results = await self._keyword_search(query, top_k * 2)
         
+        # If both are empty, return immediately (skip RRF)
+        if not vector_results and not keyword_results:
+            logger.debug("No results from vector or keyword search")
+            return []
+        
         # Reciprocal Rank Fusion
         rrf_scores = {}
         result_map = {}

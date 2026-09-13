@@ -57,6 +57,7 @@ class ApiClient {
     // Request interceptor
     this.client.interceptors.request.use(
       (config) => {
+        console.log('[apiClient →]', config.method?.toUpperCase(), config.url, config.data, config.headers?.Authorization ? '(with auth)' : '(no auth)');
         const token = getAccessToken();
         if (token) {
           config.headers.Authorization = `Bearer ${token}`;
@@ -68,8 +69,12 @@ class ApiClient {
 
     // Response interceptor
     this.client.interceptors.response.use(
-      (response) => response,
+      (response) => {
+        console.log('[apiClient ←]', response.status, response.config.url, response.data);
+        return response;
+      },
       async (error: AxiosError) => {
+        console.log('[apiClient ✗]', error.response?.status, error.config?.url, error.response?.data);
         const originalRequest = error.config as AxiosRequestConfig & { _retry?: boolean };
 
         // Handle token refresh

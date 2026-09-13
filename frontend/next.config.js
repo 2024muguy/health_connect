@@ -14,7 +14,7 @@ const nextConfig = {
       },
       {
         source: '/ws/:path*',
-        destination: `${process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000'}/ws/:path*`,
+        destination: `${process.env.NEXT_PUBLIC_WS_URL || 'http://localhost:8000'}/ws/:path*`,
       },
     ];
   },
@@ -43,6 +43,5 @@ const nextConfig = {
     NEXT_PUBLIC_APP_NAME: 'HealthConnect AI',
     NEXT_PUBLIC_APP_VERSION: '1.0.0',
   },
-};
-
+}
 module.exports = nextConfig;

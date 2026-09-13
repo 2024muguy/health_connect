@@ -114,7 +114,7 @@ class KnowledgeChunk(BaseModel, SoftDeleteMixin):
         comment="Document title",
     )
     
-    metadata = Column(
+    model_metadata = Column(
         JSON,
         nullable=True,
         comment="Additional metadata",

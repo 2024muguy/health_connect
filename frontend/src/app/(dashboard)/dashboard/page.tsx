@@ -30,8 +30,9 @@ import { formatDate } from '@/lib/utils';
 export default function DashboardPage() {
   const { user } = useAuth();
   const { upcomingAppointments, loadAppointments, isLoading: appointmentsLoading } = useAppointments();
-  const { conversations, loadConversations, isLoading: conversationsLoading } = useChat();
+  const { conversations, loadConversations } = useChat();
   const [isInitialLoading, setIsInitialLoading] = useState(true);
+  const conversationsLoading = isInitialLoading;
 
   useEffect(() => {
     const loadData = async () => {

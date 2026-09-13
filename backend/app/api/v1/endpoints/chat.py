@@ -1,30 +1,18 @@
 """
 HealthConnect AI - Chat Endpoints
 ==================================
-Chat and conversation endpoints.
-
-Endpoints:
-- POST /chat/message: Send message
-- POST /chat/stream: Stream response
-- GET /chat/conversations: List conversations
-- GET /chat/conversations/{id}: Get conversation
-- DELETE /chat/conversations/{id}: End conversation
-- POST /chat/feedback: Submit feedback
 """
 
 import json
-from typing import Optional, List
+import uuid as uuid_module
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import StreamingResponse
 
 from app.api.deps import get_chat_service, get_optional_user
 from app.schemas.chat import (
     ChatRequest,
     ChatResponse,
-    ConversationSchema,
-    ConversationListResponse,
-    FeedbackRequest,
 )
 
 from config.logging_config import get_logger
@@ -40,9 +28,7 @@ async def send_message(
     current_user: Optional[dict] = Depends(get_optional_user),
     chat_service = Depends(get_chat_service),
 ):
-    """
-    Send a message and get AI response.
-    """
+    """Send a message and get AI response."""
     try:
         response = await chat_service.process_message(
             message=request.message,
@@ -51,119 +37,88 @@ async def send_message(
             user_id=current_user.get("sub") if current_user else None,
         )
         
-        return ChatResponse(**response)
+        # Extract response data from dict or AgentResult
+        if isinstance(response, dict):
+            response_data = response
+        elif hasattr(response, 'output') and isinstance(response.output, dict):
+            response_data = response.output
+        else:
+            response_data = {}
+        
+        # Get the response text - check all possible field names
+        response_text = (
+            response_data.get("text") or
+            response_data.get("response") or
+            response_data.get("answer") or
+            "I apologize, but I couldn't generate a response. Please try again."
+        )
+        
+        # Get UUIDs
+        message_id = response_data.get("message_id")
+        if isinstance(message_id, str):
+            try:
+                message_id = uuid_module.UUID(message_id)
+            except ValueError:
+                message_id = uuid_module.uuid4()
+        else:
+            message_id = uuid_module.uuid4()
+        
+        conversation_id = response_data.get("conversation_id")
+        if isinstance(conversation_id, str):
+            try:
+                conversation_id = uuid_module.UUID(conversation_id)
+            except ValueError:
+                conversation_id = uuid_module.uuid4()
+        else:
+            conversation_id = uuid_module.uuid4()
+        
+        # Get intent
+        intent = response_data.get("intent", "general_faq")
+        if isinstance(intent, dict):
+            intent = intent.get("intent", "general_faq")
+        
+        # Get safety
+        safety_category = response_data.get("safety_category", "safe")
+        if isinstance(safety_category, dict):
+            safety_category = safety_category.get("safety_category", "safe")
+        
+        # Clean citations - ensure all fields are strings
+        raw_citations = response_data.get("citations", [])
+        citations = []
+        for citation in raw_citations:
+            if isinstance(citation, dict):
+                cleaned = {}
+                for key, value in citation.items():
+                    if value is None:
+                        cleaned[key] = ""
+                    elif not isinstance(value, str):
+                        cleaned[key] = str(value)
+                    else:
+                        cleaned[key] = value
+                citations.append(cleaned)
+            elif isinstance(citation, str):
+                citations.append({"source": citation})
+        
+        # Build response
+        chat_response = ChatResponse(
+            message_id=message_id,
+            conversation_id=conversation_id,
+            response=str(response_text),
+            intent=str(intent),
+            intent_confidence=float(response_data.get("intent_confidence", 0.5)),
+            safety_category=str(safety_category),
+            safety_score=float(response_data.get("safety_score", 1.0)),
+            action_performed=str(response_data.get("action_performed")) if response_data.get("action_performed") else None,
+            requires_human=bool(response_data.get("requires_human", False)),
+            citations=citations,
+            processing_time_ms=float(response_data.get("processing_time_ms", 0)),
+        )
+        
+        return chat_response
         
     except Exception as e:
-        logger.error(f"Chat error: {e}")
+        logger.error(f"Chat error: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to process message",
         )
-
-
-@router.post("/stream")
-async def stream_message(
-    request: ChatRequest,
-    current_user: Optional[dict] = Depends(get_optional_user),
-):
-    """
-    Stream AI response.
-    """
-    async def generate():
-        chat_service = get_chat_service()
-        
-        async for chunk in chat_service.stream_response(
-            message=request.message,
-            conversation_id=str(request.conversation_id) if request.conversation_id else None,
-        ):
-            yield f"data: {json.dumps({'chunk': chunk})}\n\n"
-        
-        yield "data: [DONE]\n\n"
-    
-    return StreamingResponse(
-        generate(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
-
-
-@router.get("/conversations", response_model=ConversationListResponse)
-async def list_conversations(
-    current_user: dict = Depends(get_optional_user),
-    chat_service = Depends(get_chat_service),
-):
-    """
-    List conversations.
-    """
-    conversations = await chat_service.get_active_conversations()
-    
-    return ConversationListResponse(
-        conversations=conversations,
-        total=len(conversations),
-        page=1,
-        page_size=20,
-    )
-
-
-@router.get("/conversations/{conversation_id}")
-async def get_conversation(
-    conversation_id: str,
-    current_user: Optional[dict] = Depends(get_optional_user),
-    chat_service = Depends(get_chat_service),
-):
-    """
-    Get conversation details.
-    """
-    history = await chat_service.get_conversation_history(conversation_id)
-    
-    if not history:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Conversation not found",
-        )
-    
-    return {
-        "conversation_id": conversation_id,
-        "messages": history,
-        "total_messages": len(history),
-    }
-
-
-@router.delete("/conversations/{conversation_id}")
-async def end_conversation(
-    conversation_id: str,
-    current_user: Optional[dict] = Depends(get_optional_user),
-    chat_service = Depends(get_chat_service),
-):
-    """
-    End a conversation.
-    """
-    result = await chat_service.end_conversation(conversation_id)
-    
-    if result.get("status") == "not_found":
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Conversation not found",
-        )
-    
-    return result
-
-
-@router.post("/feedback")
-async def submit_feedback(
-    request: FeedbackRequest,
-    current_user: Optional[dict] = Depends(get_optional_user),
-    chat_service = Depends(get_chat_service),
-):
-    """
-    Submit conversation feedback.
-    """
-    return {
-        "status": "received",
-        "conversation_id": str(request.conversation_id),
-        "satisfaction_score": request.satisfaction_score,
-    }

@@ -190,7 +190,7 @@ class Message(BaseModel):
     # ============================================
     # Metadata
     # ============================================
-    metadata = Column(
+    message_model_metadata = Column(
         JSON,
         nullable=True,
         comment="Additional message metadata",

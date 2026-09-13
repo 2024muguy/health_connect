@@ -1,6 +1,6 @@
 """
 HealthConnect AI - Prompt Templates Package
-============================================
+# ============================================
 Prompt templates for all AI agents in the system.
 
 This package provides:

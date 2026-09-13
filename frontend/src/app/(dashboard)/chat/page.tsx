@@ -7,7 +7,7 @@
 
 import { useState, useMemo, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import { Sparkles, Send, Search } from 'lucide-react';
+import { Sparkles, Send, Search, MessageCircle } from 'lucide-react';
 import { useChat } from '@/hooks/useChat';
 import { SearchField } from '@/components/ui/input';
 import { EmptyState } from '@/components/shared/EmptyState';

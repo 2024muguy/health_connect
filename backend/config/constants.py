@@ -172,6 +172,18 @@ LLM_PROVIDERS = {
         "embedding_model": "text-embedding-3-small",
         "max_tokens": 2048,
     },
+    "huggingface": {
+        "name": "Hugging Face",
+        "default_model": "mistralai/Mistral-7B-Instruct-v0.2",
+        "embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
+        "max_tokens": 512,
+    },
+    "ollama": {
+        "name": "Ollama (Local)",
+        "default_model": "llama3.1",
+        "embedding_model": "nomic-embed-text",
+        "max_tokens": 512,
+    },
     "anthropic": {
         "name": "Anthropic",
         "default_model": "claude-3-opus-20240229",
@@ -304,3 +316,7 @@ TIME_CONSTANTS = {
     "WEEK": 604800,
     "MONTH": 2592000,
 }
+# ============================================
+# ENVIRONMENT VARIABLE (for backwards compatibility)
+# ============================================
+ENVIRONMENT = "development"

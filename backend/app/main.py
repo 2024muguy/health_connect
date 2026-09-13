@@ -48,6 +48,10 @@ from app.core.events import (
     on_shutdown,
 )
 from app.api.v1.router import api_router
+from app.database.session import engine
+from app.models.base import Base
+from app.models.user import User  # noqa: F401 — registers table
+from app.models.doctor import Doctor  # noqa: F401 — registers FK target
 
 # Initialize settings
 settings = get_settings()
@@ -81,6 +85,47 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info(f"{APP_NAME} shutdown complete")
 
 
+def _init_db() -> None:
+    """Create all database tables in the configured DB (SQLite or Neon)."""
+    import traceback
+    try:
+        from app.database.session import engine
+        from app.models.base import Base
+
+        # Import order matters — FK targets must come first
+        from app.models.user import User                            # noqa: F401
+        from app.models.doctor import Doctor                        # noqa: F401
+        from app.models.patient import Patient                      # noqa: F401
+        from app.models.appointment import Appointment              # noqa: F401
+        try:
+            from app.models.conversation import Conversation        # noqa: F401
+        except Exception as e:
+            print(f"  ⚠️ Conversation: {e}")
+        try:
+            from app.models.message import Message                  # noqa: F401
+        except Exception as e:
+            print(f"  ⚠️ Message: {e}")
+        try:
+            from app.models.escalation import Escalation            # noqa: F401
+        except Exception as e:
+            print(f"  ⚠️ Escalation: {e}")
+        try:
+            from app.models.knowledge_chunk import KnowledgeChunk   # noqa: F401
+        except Exception as e:
+            print(f"  ⚠️ KnowledgeChunk: {e}")
+
+        print(f"📦 Engine: {engine.url}")
+        print(f"📦 Tables registered: {sorted(Base.metadata.tables.keys())}")
+
+        Base.metadata.create_all(bind=engine)
+        print("✅ Database tables ensured")
+    except Exception as e:
+        print(f"❌ DB init failed: {e}")
+        traceback.print_exc()
+
+
+
+
 def create_app() -> FastAPI:
     """
     Application factory function.
@@ -89,6 +134,8 @@ def create_app() -> FastAPI:
     Returns:
         FastAPI: Configured application instance
     """
+    _init_db()
+
     app = FastAPI(
         title=APP_NAME,
         version=APP_VERSION,

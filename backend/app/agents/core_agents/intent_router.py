@@ -58,6 +58,23 @@ class IntentRouterAgent(BaseAgent):
         query = context.query.lower().strip()
         
         # Try LLM-based classification if available
+        # Try Groq classifier first (more robust)
+        try:
+            from app.services.groq_classifier import groq_classifier
+            result = groq_classifier.classify_intent(context.query)
+            if result and result.get("provider") in ["groq", "keyword_precheck"]:
+                return AgentResult(
+                    agent_type=self.agent_type,
+                    status=AgentStatus.COMPLETED,
+                    output={
+                        "intent": result["intent"],
+                        "confidence": result.get("confidence", 0.5),
+                    },
+                    confidence=result.get("confidence", 0.5),
+                )
+        except Exception as e:
+            logger.warning(f"Groq classifier failed: {e}")
+        
         if self.llm_provider:
             try:
                 return await self._llm_classify(context, query)

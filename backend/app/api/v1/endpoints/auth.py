@@ -14,6 +14,8 @@ Endpoints:
 from datetime import timedelta
 from typing import Optional
 
+from sqlalchemy.orm import Session
+from app.database.session import get_session as get_db
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials
 
@@ -84,27 +86,41 @@ class UserResponse(BaseModel):
 # Endpoints
 # ============================================
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
-async def register(request: RegisterRequest):
+async def register(request: RegisterRequest, db: Session = Depends(get_db)):
     """
-    Register a new user.
+    Register a new user (persists to SQLite or Neon Postgres).
     """
-    # Placeholder - would save to database
-    user_id = f"USR-{__import__('uuid').uuid4().hex[:8].upper()}"
-    
+    from app.repositories.user_repository import UserRepository
+    from app.core.security import hash_password
+
+    repo = UserRepository(db)
+
+    if repo.email_exists(request.email):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An account with this email already exists.",
+        )
+
+    user = repo.create(
+        email=request.email,
+        hashed_password=hash_password(request.password),
+        full_name=request.full_name,
+    )
+
     access_token = security_manager.create_access_token(
-        subject=user_id,
-        extra_claims={"email": request.email, "roles": ["user"]},
+        subject=user.id,
+        extra_claims={"email": user.email, "roles": (user.roles or "user").split(",")},
         expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
     )
-    
+
     refresh_token = security_manager.create_refresh_token(
-        subject=user_id,
-        extra_claims={"email": request.email},
+        subject=user.id,
+        extra_claims={"email": user.email},
         expires_delta=timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
     )
-    
-    logger.info(f"Registered new user: {request.email}")
-    
+
+    logger.info(f"Registered new user: {user.email} ({user.id})")
+
     return TokenResponse(
         access_token=access_token,
         refresh_token=refresh_token,
@@ -113,27 +129,45 @@ async def register(request: RegisterRequest):
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(request: LoginRequest):
+async def login(request: LoginRequest, db: Session = Depends(get_db)):
     """
-    Login user.
+    Login user (verifies against database).
     """
-    # Placeholder - would verify against database
-    user_id = f"USR-{__import__('uuid').uuid4().hex[:8].upper()}"
-    
+    from app.repositories.user_repository import UserRepository
+    from app.core.security import verify_password
+
+    repo = UserRepository(db)
+    user = repo.get_by_email(request.email)
+
+    if not user or not verify_password(request.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password.",
+        )
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is disabled.",
+        )
+
+    # Update last login
+    repo.update_last_login(user)
+
     access_token = security_manager.create_access_token(
-        subject=user_id,
-        extra_claims={"email": request.email, "roles": ["user"]},
+        subject=user.id,
+        extra_claims={"email": user.email, "roles": (user.roles or "user").split(",")},
         expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
     )
-    
+
     refresh_token = security_manager.create_refresh_token(
-        subject=user_id,
-        extra_claims={"email": request.email},
+        subject=user.id,
+        extra_claims={"email": user.email},
         expires_delta=timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
     )
-    
-    logger.info(f"User logged in: {request.email}")
-    
+
+    logger.info(f"User logged in: {user.email} ({user.id})")
+
     return TokenResponse(
         access_token=access_token,
         refresh_token=refresh_token,
@@ -142,39 +176,47 @@ async def login(request: LoginRequest):
 
 
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh_token(request: RefreshRequest):
+async def refresh_token(request: RefreshRequest, db: Session = Depends(get_db)):
     """
-    Refresh access token.
+    Refresh access token (verifies user still exists and is active).
     """
+    from app.repositories.user_repository import UserRepository
+
     try:
         payload = security_manager.verify_token(request.refresh_token, expected_type="refresh")
-        
-        user_id = payload.get("sub")
-        email = payload.get("email", "")
-        
-        access_token = security_manager.create_access_token(
-            subject=user_id,
-            extra_claims={"email": email, "roles": payload.get("roles", ["user"])},
-            expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
-        )
-        
-        refresh_token_new = security_manager.create_refresh_token(
-            subject=user_id,
-            extra_claims={"email": email},
-            expires_delta=timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
-        )
-        
-        return TokenResponse(
-            access_token=access_token,
-            refresh_token=refresh_token_new,
-            expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-        )
-        
-    except Exception as e:
+    except Exception:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid refresh token",
         )
+
+    user_id = payload.get("sub")
+    repo = UserRepository(db)
+    user = repo.get_by_id(user_id)
+
+    if not user or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User no longer exists or is inactive",
+        )
+
+    access_token = security_manager.create_access_token(
+        subject=user.id,
+        extra_claims={"email": user.email, "roles": (user.roles or "user").split(",")},
+        expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
+    )
+
+    refresh_token_new = security_manager.create_refresh_token(
+        subject=user.id,
+        extra_claims={"email": user.email},
+        expires_delta=timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
+    )
+
+    return TokenResponse(
+        access_token=access_token,
+        refresh_token=refresh_token_new,
+        expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    )
 
 
 @router.post("/logout")
@@ -186,13 +228,30 @@ async def logout(current_user: dict = Depends(get_current_user)):
 
 
 @router.get("/me", response_model=UserResponse)
-async def get_me(current_user: dict = Depends(get_current_user)):
+async def get_me(
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     """
-    Get current user information.
+    Get current user information (from database).
     """
+    from app.repositories.user_repository import UserRepository
+
+    repo = UserRepository(db)
+    user = repo.get_by_id(current_user.get("sub", ""))
+
+    if not user:
+        # Token is valid but user was deleted — fall back to token claims
+        return UserResponse(
+            user_id=current_user.get("sub", ""),
+            email=current_user.get("email", ""),
+            full_name=current_user.get("full_name", current_user.get("email", "")),
+            roles=current_user.get("roles", ["user"]),
+        )
+
     return UserResponse(
-        user_id=current_user.get("sub", ""),
-        email=current_user.get("email", ""),
-        full_name=current_user.get("full_name", ""),
-        roles=current_user.get("roles", ["user"]),
+        user_id=user.id,
+        email=user.email,
+        full_name=user.full_name,
+        roles=(user.roles or "user").split(","),
     )

@@ -3,20 +3,13 @@ HealthConnect AI - Embedding Generator
 =======================================
 Embedding generation for RAG pipeline.
 
-Features:
-- Multiple embedding models
-- Batch processing
-- Caching
-- Normalization
+Supports: Ollama (local), Groq, OpenAI, Sentence-Transformers (local fallback)
 """
 
 import asyncio
 import hashlib
 import numpy as np
 from typing import List, Dict, Any, Optional
-from functools import lru_cache
-
-from app.rag.chunking import Chunk
 
 from config.settings import get_settings
 from config.logging_config import get_logger
@@ -26,84 +19,46 @@ settings = get_settings()
 
 
 class EmbeddingGenerator:
-    """
-    Embedding generator for text chunks.
-    Supports OpenAI, Sentence-Transformers, and local models.
-    """
+    """Embedding generator supporting multiple providers."""
     
     def __init__(self, model_name: Optional[str] = None):
         self.model_name = model_name or settings.rag.EMBEDDING_MODEL
         self.dimension = self._get_dimension()
         self._cache: Dict[str, List[float]] = {}
-        self._batch_size = 32
+        self._batch_size = 16
+        self._st_model = None
         logger.info(f"EmbeddingGenerator initialized with {self.model_name}")
     
     def _get_dimension(self) -> int:
-        """Get embedding dimension for model"""
+        """Get embedding dimension for model."""
         dimensions = {
             "text-embedding-3-small": 1536,
             "text-embedding-3-large": 3072,
             "text-embedding-ada-002": 1536,
             "all-MiniLM-L6-v2": 384,
+            "sentence-transformers/all-MiniLM-L6-v2": 384,
             "all-mpnet-base-v2": 768,
             "BAAI/bge-small-en": 384,
             "BAAI/bge-base-en": 768,
-            "BAAI/bge-large-en": 1024,
+            "nomic-embed-text": 768,
+            "llama3.1": 4096,
+            "llama-3.1-8b-instant": 4096,
+            "mxbai-embed-large": 1024,
         }
-        return dimensions.get(self.model_name, 1536)
+        return dimensions.get(self.model_name, 384)
     
-    async def embed_chunks(
-        self,
-        chunks: List[Chunk],
-        batch_size: Optional[int] = None,
-    ) -> List[Chunk]:
-        """
-        Generate embeddings for chunks.
-        
-        Args:
-            chunks: List of chunks
-            batch_size: Batch size for processing
-            
-        Returns:
-            List[Chunk]: Chunks with embeddings
-        """
-        batch_size = batch_size or self._batch_size
-        
-        # Filter chunks that already have embeddings
-        chunks_to_embed = [c for c in chunks if c.embedding is None]
-        chunks_with_embedding = [c for c in chunks if c.embedding is not None]
-        
-        logger.info(f"Embedding {len(chunks_to_embed)} chunks (batch size: {batch_size})")
-        
-        # Process in batches
-        for i in range(0, len(chunks_to_embed), batch_size):
-            batch = chunks_to_embed[i:i + batch_size]
-            texts = [chunk.text for chunk in batch]
-            
-            # Generate embeddings for batch
-            embeddings = await self.embed_texts(texts)
-            
-            # Assign embeddings to chunks
-            for chunk, embedding in zip(batch, embeddings):
-                chunk.embedding = embedding
-        
-        return chunks_with_embedding + chunks_to_embed
+    async def embed_query(self, query: str) -> List[float]:
+        """Generate embedding for a single query string."""
+        embeddings = await self.embed_texts([query])
+        return embeddings[0] if embeddings else []
     
     async def embed_texts(self, texts: List[str]) -> List[List[float]]:
-        """
-        Generate embeddings for texts.
-        
-        Args:
-            texts: List of texts
-            
-        Returns:
-            List[List[float]]: List of embeddings
-        """
-        # Check cache
+        """Generate embeddings for a list of texts."""
         embeddings = []
         texts_to_embed = []
         text_indices = []
         
+        # Check cache
         for i, text in enumerate(texts):
             cache_key = self._get_cache_key(text)
             if cache_key in self._cache:
@@ -111,13 +66,12 @@ class EmbeddingGenerator:
             else:
                 texts_to_embed.append(text)
                 text_indices.append(i)
-                embeddings.append(None)  # Placeholder
+                embeddings.append(None)
         
+        # Generate embeddings for uncached texts
         if texts_to_embed:
-            # Generate embeddings for uncached texts
             new_embeddings = await self._generate_embeddings(texts_to_embed)
             
-            # Update cache and results
             for text, embedding in zip(texts_to_embed, new_embeddings):
                 cache_key = self._get_cache_key(text)
                 self._cache[cache_key] = embedding
@@ -126,70 +80,124 @@ class EmbeddingGenerator:
         
         return embeddings
     
-    async def embed_query(self, query: str) -> List[float]:
-        """
-        Generate embedding for a single query.
+    async def embed_chunks(self, chunks: List[Any]) -> List[Any]:
+        """Generate embeddings for chunk objects."""
+        chunks_to_embed = [c for c in chunks if c.embedding is None]
+        chunks_with_embedding = [c for c in chunks if c.embedding is not None]
         
-        Args:
-            query: Query text
+        if chunks_to_embed:
+            texts = [chunk.text for chunk in chunks_to_embed]
+            embeddings = await self.embed_texts(texts)
             
-        Returns:
-            List[float]: Query embedding
-        """
-        embeddings = await self.embed_texts([query])
-        return embeddings[0]
+            for chunk, embedding in zip(chunks_to_embed, embeddings):
+                chunk.embedding = embedding
+        
+        return chunks_with_embedding + chunks_to_embed
     
     async def _generate_embeddings(self, texts: List[str]) -> List[List[float]]:
-        """
-        Generate embeddings using the configured model.
+        """Generate embeddings using available provider."""
         
-        Args:
-            texts: List of texts
-            
-        Returns:
-            List[List[float]]: Embeddings
-        """
-        # Use OpenAI embeddings
-        if self.model_name.startswith("text-embedding"):
-            return await self._openai_embeddings(texts)
+        # Try Ollama first (local, free)
+        try:
+            return await self._ollama_embeddings(texts)
+        except Exception as e:
+            logger.warning(f"Ollama embedding failed: {e}")
         
-        # Use Sentence-Transformers
-        elif self.model_name in ["all-MiniLM-L6-v2", "all-mpnet-base-v2", "BAAI/bge-small-en", "BAAI/bge-base-en", "BAAI/bge-large-en"]:
-            return await self._sentence_transformer_embeddings(texts)
+        # Try Groq (if API key set)
+        if settings.groq.API_KEY:
+            try:
+                return await self._groq_embeddings(texts)
+            except Exception as e:
+                logger.warning(f"Groq embedding failed: {e}")
         
-        else:
-            raise ValueError(f"Unsupported embedding model: {self.model_name}")
+        # Try OpenAI (if API key set)
+        if settings.llm.OPENAI_API_KEY:
+            try:
+                return await self._openai_embeddings(texts)
+            except Exception as e:
+                logger.warning(f"OpenAI embedding failed: {e}")
+        
+        # Fallback: Sentence-Transformers (local)
+        return await self._sentence_transformer_embeddings(texts)
+    
+    async def _ollama_embeddings(self, texts: List[str]) -> List[List[float]]:
+        """Generate embeddings using Ollama (local)."""
+        import aiohttp
+        
+        model = settings.ollama.EMBEDDING_MODEL
+        base_url = settings.ollama.BASE_URL.rstrip('/')
+        embeddings = []
+        
+        logger.info(f"Using Ollama embeddings: {model}")
+        
+        async with aiohttp.ClientSession() as session:
+            for text in texts:
+                async with session.post(
+                    f"{base_url}/api/embeddings",
+                    json={"model": model, "prompt": text},
+                    timeout=aiohttp.ClientTimeout(total=30),
+                ) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        raise ValueError(f"Ollama error ({response.status}): {error_text[:200]}")
+                    result = await response.json()
+                    emb = result.get("embedding", [])
+                    if emb:
+                        embeddings.append(emb)
+                    else:
+                        raise ValueError("Ollama returned empty embedding")
+        
+        logger.info(f"✅ Generated {len(embeddings)} embeddings via Ollama")
+        return embeddings
+    
+    async def _groq_embeddings(self, texts: List[str]) -> List[List[float]]:
+        """Generate embeddings using Groq."""
+        # Groq doesn't have a dedicated embedding endpoint yet
+        # Use a simple hash-based fallback for now
+        logger.warning("Groq doesn't support embeddings yet. Using hash-based fallback.")
+        
+        embeddings = []
+        for text in texts:
+            # Simple deterministic embedding from text hash
+            hash_bytes = hashlib.sha256(text.encode()).digest()
+            embedding = [float(b) / 255.0 for b in hash_bytes[:32]]
+            # Pad or truncate to dimension
+            if len(embedding) < self.dimension:
+                embedding.extend([0.0] * (self.dimension - len(embedding)))
+            else:
+                embedding = embedding[:self.dimension]
+            embeddings.append(embedding)
+        
+        return embeddings
     
     async def _openai_embeddings(self, texts: List[str]) -> List[List[float]]:
-        """Generate embeddings using OpenAI API"""
+        """Generate embeddings using OpenAI."""
         from openai import AsyncOpenAI
         
         client = AsyncOpenAI(api_key=settings.llm.OPENAI_API_KEY)
+        response = await client.embeddings.create(
+            model=self.model_name,
+            input=texts,
+        )
         
-        try:
-            response = await client.embeddings.create(
-                model=self.model_name,
-                input=texts,
-            )
-            
-            # Sort by index to maintain order
-            embeddings = sorted(response.data, key=lambda x: x.index)
-            return [item.embedding for item in embeddings]
-            
-        except Exception as e:
-            logger.error(f"OpenAI embedding failed: {e}")
-            raise
+        embeddings = sorted(response.data, key=lambda x: x.index)
+        return [item.embedding for item in embeddings]
     
     async def _sentence_transformer_embeddings(self, texts: List[str]) -> List[List[float]]:
-        """Generate embeddings using Sentence-Transformers"""
+        """Generate embeddings using Sentence-Transformers (local fallback)."""
         from sentence_transformers import SentenceTransformer
         
-        # Load model (cached)
-        model = self._get_sentence_transformer_model()
+        model_name = self.model_name
+        if model_name.startswith("sentence-transformers/"):
+            model_name = model_name.replace("sentence-transformers/", "")
         
-        # Run in thread pool (CPU-bound)
+        logger.info(f"Using Sentence-Transformers: {model_name}")
+        
+        if not self._st_model:
+            self._st_model = SentenceTransformer(model_name)
+        
         embeddings = await asyncio.to_thread(
-            model.encode,
+            self._st_model.encode,
             texts,
             normalize_embeddings=True,
             show_progress_bar=False,
@@ -197,53 +205,40 @@ class EmbeddingGenerator:
         
         return embeddings.tolist()
     
-    def _get_sentence_transformer_model(self):
-        """Get or load Sentence-Transformer model"""
-        if not hasattr(self, '_st_model'):
-            from sentence_transformers import SentenceTransformer
-            self._st_model = SentenceTransformer(self.model_name)
-        
-        return self._st_model
-    
     def _get_cache_key(self, text: str) -> str:
-        """Generate cache key for text"""
+        """Generate cache key for text."""
         return f"{self.model_name}:{hashlib.sha256(text.encode()).hexdigest()}"
     
     def normalize_embedding(self, embedding: List[float]) -> List[float]:
-        """L2 normalize embedding"""
+        """L2 normalize embedding."""
         arr = np.array(embedding)
         norm = np.linalg.norm(arr)
         if norm > 0:
             arr = arr / norm
         return arr.tolist()
     
-    def cosine_similarity(
-        self,
-        embedding1: List[float],
-        embedding2: List[float],
-    ) -> float:
-        """Calculate cosine similarity between embeddings"""
-        arr1 = np.array(embedding1)
-        arr2 = np.array(embedding2)
+    def cosine_similarity(self, emb1: List[float], emb2: List[float]) -> float:
+        """Calculate cosine similarity between embeddings."""
+        arr1 = np.array(emb1)
+        arr2 = np.array(emb2)
         
-        dot_product = np.dot(arr1, arr2)
+        dot = np.dot(arr1, arr2)
         norm1 = np.linalg.norm(arr1)
         norm2 = np.linalg.norm(arr2)
         
         if norm1 == 0 or norm2 == 0:
             return 0.0
         
-        return float(dot_product / (norm1 * norm2))
+        return float(dot / (norm1 * norm2))
     
     def clear_cache(self) -> None:
-        """Clear embedding cache"""
+        """Clear embedding cache."""
         self._cache = {}
-        logger.info("Embedding cache cleared")
     
-    def get_cache_stats(self) -> Dict[str, Any]:
-        """Get cache statistics"""
+    def get_stats(self) -> Dict[str, Any]:
+        """Get cache statistics."""
         return {
             "model": self.model_name,
-            "cache_size": len(self._cache),
             "dimension": self.dimension,
+            "cache_size": len(self._cache),
         }

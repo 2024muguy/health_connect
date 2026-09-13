@@ -25,6 +25,7 @@ from app.agents.base_agent import (
 )
 
 from config.logging_config import get_logger
+from app.services.groq_classifier import groq_classifier
 from config.settings import get_settings
 from config.constants import SAFETY_CATEGORIES, SAFETY_ACTIONS, SAFETY_SEVERITY
 from config.prompts.prompt_templates import SafetyPromptTemplate
@@ -222,22 +223,47 @@ class SafetyAgent(BaseAgent):
     
     def _check_medical_advice(self, query: str) -> bool:
         """Check for medical advice request"""
-        # Check for medical terms
-        has_medical_term = any(term in query for term in self.medical_terms)
-        
-        # Check for advice-seeking patterns
-        advice_patterns = [
-            r'what should i (?:take|do|use)',
-            r'is (?:this|my|it) (?:serious|normal|bad)',
-            r'should i (?:be worried|see a doctor|go to)',
-            r'do i (?:need|have) (?:medication|treatment|surgery)',
-            r'can you (?:diagnose|treat|prescribe)',
-            r'how do i (?:treat|cure|fix)',
+        # Extended medical symptoms and conditions
+        medical_symptoms = [
+            'headache', 'pain', 'rash', 'fever', 'symptom', 'sick',
+            'cough', 'cold', 'flu', 'nausea', 'dizzy', 'fatigue',
+            'infection', 'allergy', 'swelling', 'bruise', 'cut',
+            'burn', 'itch', 'sore throat', 'stomach', 'diarrhea',
+            'constipation', 'blood pressure', 'diabetes', 'asthma',
+            'anxiety', 'depression', 'insomnia', 'migraine',
         ]
         
+        # Direct advice-seeking patterns (strong indicators)
+        advice_patterns = [
+            r'what should i (?:take|do|use|eat|drink)',
+            r'is (?:this|my|it) (?:serious|normal|bad)',
+            r'should i (?:be worried|see a doctor|go to)',
+            r'do i (?:need|have) (?:medication|treatment|surgery|antibiotics)',
+            r'can you (?:diagnose|treat|prescribe|recommend)',
+            r'how do i (?:treat|cure|fix|manage)',
+            r'what (?:can|should) i (?:take|do) (?:for|about)',
+            r'is it (?:normal|okay|safe) (?:to|if|that)',
+        ]
+        
+        # Check for direct advice patterns (strongest signal)
         has_advice_pattern = any(re.search(p, query, re.IGNORECASE) for p in advice_patterns)
         
-        return has_medical_term and has_advice_pattern
+        # Check for medical symptoms
+        has_symptom = any(symptom in query for symptom in medical_symptoms)
+        
+        # Check existing medical terms from settings
+        has_medical_term = any(term in query for term in self.medical_terms)
+        
+        # Return True if:
+        # 1. Has advice pattern AND (symptom or medical term)
+        # 2. Has symptom AND asks "what" or "how" (question about health)
+        if has_advice_pattern and (has_symptom or has_medical_term):
+            return True
+        
+        if has_symptom and any(word in query for word in ['what', 'how', 'should', 'can']):
+            return True
+        
+        return False
     
     def _check_pii_request(self, query: str) -> bool:
         """Check for PII request"""

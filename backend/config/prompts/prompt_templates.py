@@ -1,6 +1,6 @@
 """
 HealthConnect AI - Prompt Templates
-====================================
+# ====================================
 Reusable prompt templates for various AI operations.
 
 Template types:
@@ -107,7 +107,6 @@ Categories:
 User Query: {query}
 
 Respond in JSON format:
-```json
 {
     "safety_category": "category_name",
     "action": "allow|block|emergency_protocol|escalate|redirect",
@@ -145,9 +144,9 @@ Respond in JSON:
 """
 
 class IntentPromptTemplate:
-"""Intent classification prompt templates"""
+    """Intent classification prompt templates"""
 
-CLASSIFICATION_PROMPT = """Classify the following user query into the correct intent category.
+    CLASSIFICATION_PROMPT = """Classify the following user query into the correct intent category.
 
 Intent Categories:
 
@@ -190,7 +189,7 @@ Respond in JSON:
 }
 """
 
-ROUTING_PROMPT = """Route the following query to the appropriate service based on its intent.
+    ROUTING_PROMPT = """Route the following query to the appropriate service based on its intent.
 
 User Query: {query}
 Detected Intent: {intent}
@@ -224,10 +223,11 @@ Respond with the routing decision:
 }
 """
 
-class SummaryPromptTemplate:
-"""Conversation summary prompt templates"""
 
-CONVERSATION_SUMMARY = """Summarize the following conversation between a patient and the HealthConnect AI Assistant.
+class SummaryPromptTemplate:
+    """Conversation summary prompt templates"""
+
+    CONVERSATION_SUMMARY = """Summarize the following conversation between a patient and the HealthConnect AI Assistant.
 
 Conversation:
 {conversation}
@@ -247,7 +247,7 @@ Follow-up required
 Summary:
 """
 
-ACTION_SUMMARY = """Extract all actions taken during this conversation.
+    ACTION_SUMMARY = """Extract all actions taken during this conversation.
 
 Conversation:
 {conversation}

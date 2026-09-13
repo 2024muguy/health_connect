@@ -229,3 +229,49 @@ class SecurityManager:
 
 # Singleton instance
 security_manager = SecurityManager()
+
+# ============================================================
+# Password Hashing
+# ============================================================
+from passlib.context import CryptContext
+
+_password_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+
+def hash_password(plain: str) -> str:
+    """Hash a plaintext password using bcrypt."""
+    return _password_context.hash(plain)
+
+
+def verify_password(plain: str, hashed: str) -> bool:
+    """Verify a plaintext password against a bcrypt hash."""
+    try:
+        return _password_context.verify(plain, hashed)
+    except Exception:
+        return False
+
+
+# ============================================================
+# Password Hashing (direct bcrypt — no passlib)
+# ============================================================
+import bcrypt as _bcrypt
+
+
+def hash_password(plain: str) -> str:
+    """Hash a plaintext password using bcrypt directly."""
+    if isinstance(plain, str):
+        plain = plain.encode("utf-8")
+    plain = plain[:72]  # bcrypt 72-byte limit
+    return _bcrypt.hashpw(plain, _bcrypt.gensalt()).decode("utf-8")
+
+
+def verify_password(plain: str, hashed: str) -> bool:
+    """Verify a plaintext password against a bcrypt hash."""
+    try:
+        if isinstance(plain, str):
+            plain = plain.encode("utf-8")
+        if isinstance(hashed, str):
+            hashed = hashed.encode("utf-8")
+        return _bcrypt.checkpw(plain[:72], hashed)
+    except Exception:
+        return False

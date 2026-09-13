@@ -1,16 +1,12 @@
 """
-HealthConnect AI - Conversation Agent
-======================================
-Main conversational agent for response generation.
-
-Features:
-- RAG-grounded response generation
-- Context-aware responses
-- Citation inclusion
-- Safety-aware generation
+HealthConnect AI - Conversation Agent (Production Ready)
+=========================================================
+Generates responses using Groq with RAG context.
 """
 
 import time
+import os
+import requests
 from typing import List, Dict, Any, Optional
 
 from app.agents.base_agent import (
@@ -25,16 +21,14 @@ from app.rag.citation_generator import CitationGenerator
 
 from config.logging_config import get_logger
 from config.prompts.system_prompts import CONVERSATION_AGENT_PROMPT
-from config.prompts.prompt_templates import RAGPromptTemplate
+from dotenv import load_dotenv
 
+load_dotenv()
 logger = get_logger(__name__)
 
 
 class ConversationAgent(BaseAgent):
-    """
-    Conversation Agent.
-    Generates grounded responses using RAG context.
-    """
+    """Conversation Agent using Groq for response generation."""
     
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         super().__init__(AgentType.CONVERSATION, config)
@@ -42,18 +36,15 @@ class ConversationAgent(BaseAgent):
         self.citation_generator = CitationGenerator()
         self.max_history_messages = 10
         
-        logger.info("ConversationAgent initialized")
+        # Groq configuration
+        self.api_key = os.getenv("GROQ_API_KEY", "")
+        self.model = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
+        self.api_url = "https://api.groq.com/openai/v1/chat/completions"
+        
+        logger.info(f"ConversationAgent initialized with Groq model: {self.model}")
     
     async def execute(self, context: AgentContext) -> AgentResult:
-        """
-        Generate response using RAG.
-        
-        Args:
-            context: Agent context
-            
-        Returns:
-            AgentResult: Generated response
-        """
+        """Generate response using Groq with RAG context."""
         start_time = time.time()
         
         # Build context from retrieved chunks
@@ -62,20 +53,13 @@ class ConversationAgent(BaseAgent):
             include_citations=True,
         )
         
+        logger.info(f"Context: {built_context.chunks_used} chunks, {len(built_context.context_text)} chars")
+        
         # Generate response
-        if self.llm_provider:
-            response_text = await self._generate_with_llm(context, built_context)
-        else:
-            response_text = self._generate_fallback(context, built_context)
+        response_text = await self._generate_with_groq(context, built_context)
         
         # Generate citations
         citations = self.citation_generator.generate_citations(built_context.sources)
-        
-        # Add citations to response if not already present
-        if citations and "[Source" not in response_text:
-            response_text += self.citation_generator.generate_reference_list(
-                built_context.sources
-            )
         
         execution_time = (time.time() - start_time) * 1000
         
@@ -87,122 +71,112 @@ class ConversationAgent(BaseAgent):
                 "citations": citations,
                 "context_used": built_context.context_text,
                 "sources": built_context.sources,
-                "truncated": built_context.truncated,
             },
-            confidence=self._calculate_confidence(built_context),
+            confidence=0.7 if built_context.chunks_used > 0 else 0.3,
             execution_time_ms=execution_time,
         )
     
-    async def _generate_with_llm(
-        self,
-        context: AgentContext,
-        built_context: Any,
-    ) -> str:
-        """
-        Generate response using LLM.
+    async def _generate_with_groq(self, context: AgentContext, built_context: Any) -> str:
+        """Generate response using Groq API directly."""
+        if not self.api_key:
+            logger.warning("No Groq API key available")
+            return self._generate_fallback(context, built_context)
         
-        Args:
-            context: Agent context
-            built_context: Built context
+        # Build context text (limit to 2000 chars)
+        context_text = built_context.context_text[:2000] if built_context.context_text else "No specific context available."
+        
+        # Build system prompt
+        system_prompt = """You are HealthConnect AI Assistant, a professional clinic assistant.
+Provide helpful, accurate, and concise answers based on the context provided.
+If the answer is not in the context, say you don't have that information.
+Never provide medical advice."""
+        
+        # Build user prompt with context
+        user_prompt = f"""Context from Knowledge Base:
+{context_text}
+
+User question: {context.query}
+
+Please answer the user's question based on the context above. Be concise and helpful."""
+        
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "max_tokens": 300,
+            "temperature": 0.3,
+        }
+        
+        try:
+            import asyncio
+            loop = asyncio.get_event_loop()
             
-        Returns:
-            str: Generated response
-        """
-        from app.llm.base import LLMMessage
-        
-        # Build messages
-        messages = [
-            LLMMessage(role="system", content=CONVERSATION_AGENT_PROMPT),
-        ]
-        
-        # Add conversation history
-        for msg in context.history[-self.max_history_messages:]:
-            messages.append(LLMMessage(
-                role=msg.get("role", "user"),
-                content=msg.get("content", ""),
-            ))
-        
-        # Add current query with context
-        user_prompt = RAGPromptTemplate.SYSTEM_PROMPT.format(
-            context=built_context.context_text,
-            query=context.query,
-        )
-        messages.append(LLMMessage(role="user", content=user_prompt))
-        
-        # Generate response
-        response = await self.llm_provider.generate_with_retry(
-            messages,
-            temperature=0.3,
-            max_tokens=500,
-        )
-        
-        return response.text
+            # Run in thread executor to avoid blocking
+            response = await loop.run_in_executor(
+                None,
+                lambda: requests.post(self.api_url, headers=headers, json=payload, timeout=30)
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+                
+                if content and content.strip():
+                    logger.info(f"Groq response generated: {len(content)} chars")
+                    return content.strip()
+                else:
+                    logger.warning("Groq returned empty content")
+                    return self._generate_fallback(context, built_context)
+            else:
+                logger.warning(f"Groq API error: {response.status_code} - {response.text[:200]}")
+                return self._generate_fallback(context, built_context)
+                
+        except Exception as e:
+            logger.error(f"Groq generation failed: {e}")
+            return self._generate_fallback(context, built_context)
     
-    def _generate_fallback(
-        self,
-        context: AgentContext,
-        built_context: Any,
-    ) -> str:
-        """
-        Generate fallback response without LLM.
-        
-        Args:
-            context: Agent context
-            built_context: Built context
-            
-        Returns:
-            str: Fallback response
-        """
+    def _generate_fallback(self, context: AgentContext, built_context: Any) -> str:
+        """Generate fallback response using context."""
         if built_context.chunks_used > 0:
-            # Extract relevant information from context
+            # Extract relevant text from context
             return self._extract_answer_from_context(context.query, built_context.context_text)
         
+        # No context - generic fallback
         return (
-            "I apologize, but I don't have specific information about that. "
-            "Would you like me to help you with appointment scheduling, "
-            "clinic information, or other administrative tasks?"
+            "I'm here to help with HealthConnect Clinic questions. "
+            "You can ask me about appointments, clinic hours, locations, services, and billing. "
+            "What would you like to know?"
         )
     
     def _extract_answer_from_context(self, query: str, context: str) -> str:
-        """
-        Extract answer from context using simple heuristics.
-        
-        Args:
-            query: User query
-            context: Context text
-            
-        Returns:
-            str: Extracted answer
-        """
-        # Split context into sentences
+        """Extract answer from context using text overlap."""
         sentences = context.split('\n')
-        
-        # Find most relevant sentences
         query_terms = set(query.lower().split())
         
         scored_sentences = []
         for sentence in sentences:
             sentence_terms = set(sentence.lower().split())
             overlap = query_terms.intersection(sentence_terms)
-            score = len(overlap)
-            
-            if score > 0:
-                scored_sentences.append((score, sentence))
+            if len(overlap) > 0:
+                scored_sentences.append((len(overlap), sentence.strip()))
         
-        # Sort by score
         scored_sentences.sort(key=lambda x: x[0], reverse=True)
         
-        # Return top sentences
         if scored_sentences:
+            # Return top 2-3 sentences
             return ' '.join(s for _, s in scored_sentences[:3])
         
-        return (
-            "Based on the information available, I found some relevant details. "
-            "Please let me know if you need more specific information."
-        )
+        return "I found some relevant information. Let me know if you need more details."
     
     def _convert_chunks_to_results(self, chunks: List[Dict[str, Any]]) -> List[Any]:
-        """Convert chunk dictionaries to retrieval results"""
+        """Convert chunk dictionaries to retrieval results."""
         from app.rag.retriever import RetrievalResult
         
         results = []
@@ -211,21 +185,8 @@ class ConversationAgent(BaseAgent):
                 chunk_id=chunk.get("chunk_id", ""),
                 text=chunk.get("text", ""),
                 score=chunk.get("score", 0.5),
-                retrieval_method=chunk.get("retrieval_method", "unknown"),
+                retrieval_method=chunk.get("retrieval_method", "hybrid"),
                 metadata=chunk.get("metadata", {}),
             ))
         
         return results
-    
-    def _calculate_confidence(self, built_context: Any) -> float:
-        """Calculate confidence based on context quality"""
-        if built_context.chunks_used == 0:
-            return 0.1
-        
-        if built_context.truncated:
-            return 0.5
-        
-        if built_context.chunks_used >= 3:
-            return 0.8
-        
-        return 0.6

@@ -138,7 +138,7 @@ class Conversation(BaseModel):
         comment="Auto-generated conversation summary",
     )
     
-    metadata = Column(
+    conversation_model_metadata = Column(
         JSON,
         nullable=True,
         comment="Additional conversation metadata",

@@ -36,6 +36,10 @@ class ChatService:
     
     def __init__(self):
         self.orchestrator = Orchestrator()
+        
+        # Register all agents
+        from app.services.agent_setup import setup_agents
+        setup_agents(self.orchestrator)
         self._active_sessions: Dict[str, Dict[str, Any]] = {}
         self._conversation_history: Dict[str, List[Dict[str, Any]]] = {}
         self.session_timeout = settings.safety.SESSION_TIMEOUT_MINUTES * 60
@@ -91,7 +95,7 @@ class ChatService:
         })
         history.append({
             "role": "assistant",
-            "content": result.output.get("text", ""),
+            "content": result.output.get("text", result.output.get("response", "")),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
         
@@ -102,16 +106,27 @@ class ChatService:
         
         self._conversation_history[conversation_id or conversation.conversation_code] = history
         
-        # Build response
+        # Get response text from orchestrator output
+        response_text = (
+            result.output.get("text") or
+            result.output.get("response") or
+            "I apologize, but I couldn't generate a response. Please try again."
+        )
+        
+        # Build response with BOTH "text" and "message" keys for compatibility
         response = {
             "conversation_id": conversation_id or conversation.conversation_code,
-            "message": result.output.get("text", ""),
+            "text": response_text,
+            "message": response_text,  # Keep for backwards compatibility
+            "response": response_text,  # Support "response" key too
             "intent": result.output.get("intent", "unknown"),
             "intent_confidence": result.confidence,
             "safety_category": result.output.get("safety_category", "safe"),
+            "safety_score": result.output.get("safety_score", 1.0),
             "requires_human": result.output.get("requires_human", False),
             "citations": result.output.get("citations", []),
             "action_performed": result.output.get("action_performed"),
+            "processing_time_ms": result.execution_time_ms,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         

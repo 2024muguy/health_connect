@@ -113,13 +113,13 @@ export function Header({ onMenuClick, className }: HeaderProps) {
               <Avatar
                 initials={
                   user
-                    ? getInitials(user.firstName, user.lastName)
+                    ? getInitials(user.firstName || '', user.lastName || '')
                     : 'HC'
                 }
                 small
               />
               <span className="hidden sm:block">
-                {user ? `${user.firstName}` : 'My profile'}
+                {user ? `${user.firstName || user.full_name || 'My profile'}` : 'My profile'}
               </span>
               <ChevronDown size={14} className="text-muted-foreground" />
             </div>

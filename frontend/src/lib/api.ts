@@ -9,6 +9,7 @@ import type {
   LoginRequest,
   LoginResponse,
   RegisterRequest,
+  RegisterPayload,
   ChatRequest,
   ChatResponse,
   Conversation,
@@ -27,7 +28,7 @@ export const authApi = {
   login: (data: LoginRequest) =>
     apiClient.post<LoginResponse>(API_ENDPOINTS.AUTH.LOGIN, data),
 
-  register: (data: RegisterRequest) =>
+  register: (data: RegisterPayload) =>
     apiClient.post<LoginResponse>(API_ENDPOINTS.AUTH.REGISTER, data),
 
   refresh: (refreshToken: string) =>
@@ -36,8 +37,13 @@ export const authApi = {
   logout: () =>
     apiClient.post(API_ENDPOINTS.AUTH.LOGOUT),
 
-  me: () =>
-    apiClient.get<UserProfile>(API_ENDPOINTS.AUTH.ME),
+  me: (accessToken?: string) =>
+    apiClient.get<UserProfile>(
+      API_ENDPOINTS.AUTH.ME,
+      accessToken
+        ? { headers: { Authorization: `Bearer ${accessToken}` } }
+        : undefined,
+    ),
 };
 
 // ============================================

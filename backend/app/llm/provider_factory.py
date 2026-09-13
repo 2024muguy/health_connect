@@ -2,162 +2,92 @@
 HealthConnect AI - LLM Provider Factory
 ========================================
 Factory for creating and managing LLM providers.
-
-Features:
-- Provider instantiation
-- Provider caching
-- Automatic provider selection
-- Health checks
+Priority: Groq (cloud) > Ollama (local fallback)
 """
 
-from typing import Optional, Dict, List, Any
-
-from app.llm.base import (
-    BaseLLMProvider,
-    LLMConfig,
-    LLMMessage,
-    LLMResponse,
-    LLMError,
-)
-from app.llm.openai_provider import OpenAIProvider
-from app.llm.anthropic_provider import AnthropicProvider
-from app.llm.gemini_provider import GeminiProvider
-from app.llm.local_provider import LocalProvider
-
-from config.settings import get_settings
+from typing import Dict, Optional, List
+from app.llm.base import BaseLLMProvider, LLMConfig
 from config.logging_config import get_logger
+from config.settings import get_settings
 
 logger = get_logger(__name__)
 settings = get_settings()
 
 
 class LLMProviderFactory:
-    """
-    Factory for LLM providers.
-    Manages provider instances and selection.
-    """
+    """Factory for LLM providers."""
     
-    _instance = None
-    _providers: Dict[str, BaseLLMProvider] = {}
+    def __init__(self):
+        self._providers: Dict[str, BaseLLMProvider] = {}
     
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-    
-    async def initialize(self) -> None:
-        """Initialize all configured providers"""
-        self._providers = {}
+    async def initialize(self):
+        """Initialize available providers."""
         
-        # OpenAI
-        if settings.llm.OPENAI_API_KEY:
+        # 1. Groq (cloud - primary, fast, free tier)
+        if settings.groq.API_KEY:
+            try:
+                from app.llm.groq_provider import GroqProvider
+                config = LLMConfig(
+                    provider="groq",
+                    api_key=settings.groq.API_KEY,
+                    model=settings.groq.MODEL,
+                    max_tokens=settings.groq.MAX_TOKENS,
+                    temperature=settings.groq.TEMPERATURE,
+                    timeout=60,
+                )
+                self._providers["groq"] = GroqProvider(config)
+                logger.info("✅ Groq provider initialized (cloud)")
+            except Exception as e:
+                logger.warning(f"Groq initialization error: {e}")
+        
+        # 2. Ollama (local - fallback)
+        try:
+            from app.llm.ollama_provider import OllamaProvider
             config = LLMConfig(
-                provider="openai",
-                model=settings.llm.OPENAI_MODEL,
-                api_key=settings.llm.OPENAI_API_KEY,
-                max_tokens=settings.llm.OPENAI_MAX_TOKENS,
-                temperature=settings.llm.OPENAI_TEMPERATURE,
+                provider="ollama",
+                api_key=settings.ollama.BASE_URL,
+                model=settings.ollama.MODEL,
+                max_tokens=512,
+                temperature=0.3,
+                timeout=300,
             )
-            self._providers["openai"] = OpenAIProvider(config)
-            logger.info("OpenAI provider initialized")
+            ollama_provider = OllamaProvider(config)
+            if await ollama_provider.check_availability():
+                self._providers["ollama"] = ollama_provider
+                logger.info("✅ Ollama provider initialized (local fallback)")
+            else:
+                logger.info("Ollama not running - skipping")
+        except Exception as e:
+            logger.warning(f"Ollama initialization error: {e}")
         
-        # Anthropic
-        if settings.llm.ANTHROPIC_API_KEY:
-            config = LLMConfig(
-                provider="anthropic",
-                model=settings.llm.ANTHROPIC_MODEL,
-                api_key=settings.llm.ANTHROPIC_API_KEY,
-                max_tokens=settings.llm.ANTHROPIC_MAX_TOKENS,
-                temperature=settings.llm.ANTHROPIC_TEMPERATURE,
-            )
-            self._providers["anthropic"] = AnthropicProvider(config)
-            logger.info("Anthropic provider initialized")
-        
-        # Google Gemini
-        if settings.llm.GOOGLE_API_KEY:
-            config = LLMConfig(
-                provider="google",
-                model=settings.llm.GOOGLE_MODEL,
-                api_key=settings.llm.GOOGLE_API_KEY,
-                max_tokens=settings.llm.GOOGLE_MAX_TOKENS,
-                temperature=settings.llm.GOOGLE_TEMPERATURE,
-            )
-            self._providers["google"] = GeminiProvider(config)
-            logger.info("Google Gemini provider initialized")
-        
-        # Local fallback
-        local_config = LLMConfig(
-            provider="local",
-            model="microsoft/DialoGPT-small",
-            max_tokens=100,
-            temperature=0.7,
-        )
-        self._providers["local"] = LocalProvider(local_config)
-        logger.info("Local fallback provider initialized")
-    
-    async def close(self) -> None:
-        """Close all providers"""
-        self._providers = {}
-        logger.info("LLM providers closed")
-    
-    def get_provider(self, provider_name: Optional[str] = None) -> BaseLLMProvider:
-        """
-        Get provider by name or default.
-        
-        Args:
-            provider_name: Provider name (openai, anthropic, google, local)
-            
-        Returns:
-            BaseLLMProvider: Provider instance
-        """
-        if provider_name and provider_name in self._providers:
-            return self._providers[provider_name]
-        
-        # Use default provider
-        default = settings.llm.DEFAULT_PROVIDER
-        if default in self._providers:
-            return self._providers[default]
-        
-        # Fallback to first available
-        for provider in self._providers.values():
-            return provider
-        
-        raise LLMError(
-            message="No LLM provider available",
-            provider="none",
-            error_type="no_provider",
-            retryable=False,
-        )
+        if not self._providers:
+            logger.warning("No LLM providers available!")
     
     def get_available_providers(self) -> List[str]:
-        """Get list of available providers"""
+        """Get list of available provider names."""
         return list(self._providers.keys())
     
-    async def get_provider_stats(self) -> Dict[str, Any]:
-        """Get stats for all providers"""
-        stats = {}
-        for name, provider in self._providers.items():
-            stats[name] = provider.get_stats()
-        return stats
-
-
-# Singleton instance
-_factory = LLMProviderFactory()
-
-
-def get_llm_provider(provider_name: Optional[str] = None) -> BaseLLMProvider:
-    """
-    Get LLM provider instance.
+    def get_provider(self, name: str) -> BaseLLMProvider:
+        """Get a provider by name."""
+        if name not in self._providers:
+            raise ValueError(f"Provider '{name}' not available")
+        return self._providers[name]
     
-    Args:
-        provider_name: Provider name
-        
-    Returns:
-        BaseLLMProvider: Provider instance
-    """
-    return _factory.get_provider(provider_name)
+    @property
+    def default_provider(self) -> Optional[BaseLLMProvider]:
+        """Get the default provider (Groq preferred, Ollama fallback)."""
+        if "groq" in self._providers:
+            return self._providers["groq"]
+        if "ollama" in self._providers:
+            return self._providers["ollama"]
+        return None
 
 
-async def check_llm_providers() -> bool:
-    """Check if any LLM providers are available"""
-    return len(_factory.get_available_providers()) > 0
+async def get_llm_provider(name: Optional[str] = None) -> BaseLLMProvider:
+    """Get an LLM provider by name or default."""
+    factory = LLMProviderFactory()
+    await factory.initialize()
+    
+    if name:
+        return factory.get_provider(name)
+    return factory.default_provider

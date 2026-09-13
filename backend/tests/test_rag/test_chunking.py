@@ -37,7 +37,6 @@ class TestChunkingEngine:
     def test_sentence_aware_chunking(self, engine):
         """Test sentence-aware chunking"""
         text = "This is the first sentence. This is the second sentence. This is the third sentence."
-        S
         chunks = engine.chunk_document(
             text,
             document_id="test_doc",

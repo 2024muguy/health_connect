@@ -1,12 +1,9 @@
 
----
 
-## config/prompts/few_shot_examples.py
 
-```python
 """
 HealthConnect AI - Few-Shot Examples
-=====================================
+# =====================================
 Few-shot examples for training and in-context learning.
 
 Categories:

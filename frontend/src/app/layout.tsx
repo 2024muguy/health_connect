@@ -1,47 +1,34 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { type ReactNode } from 'react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { ErrorBoundary } from '@/components/shared/ErrorBoundary';
-import { Toaster } from '@/components/ui/toast';
-import { TooltipProvider } from '@/components/ui/tooltip';
+import { Providers } from './providers';
+// TypeScript may not have declarations for global CSS imports, but Next.js bundles this stylesheet.
+// @ts-expect-error Missing declaration for side-effect CSS import.
 import './globals.css';
-
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 30000,
-      retry: 2,
-      refetchOnWindowFocus: false,
-    },
-  },
-});
 
 export const metadata: Metadata = {
   title: {
     default: 'HealthConnect AI - Patient Companion',
     template: '%s | HealthConnect AI',
   },
-  description: 'Your care, thoughtfully organized. Manage appointments, chat with your care assistant, and access clinic information.',
+  description:
+    'Your care, thoughtfully organized. Manage appointments, chat with your care assistant, and access clinic information.',
   keywords: ['healthcare', 'appointments', 'clinic', 'patient portal', 'AI assistant'],
   authors: [{ name: 'HealthConnect AI' }],
-  viewport: 'width=device-width, initial-scale=1',
   icons: {
     icon: '/favicon.ico',
   },
+};
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
       <body>
-        <QueryClientProvider client={queryClient}>
-          <TooltipProvider>
-            <ErrorBoundary>
-              {children}
-            </ErrorBoundary>
-            <Toaster />
-          </TooltipProvider>
-        </QueryClientProvider>
+        <Providers>{children}</Providers>
       </body>
     </html>
   );

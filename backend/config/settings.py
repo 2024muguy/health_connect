@@ -16,6 +16,9 @@ Configuration categories:
 """
 
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 from functools import lru_cache
 from typing import List, Optional, Dict, Any
 from pydantic import Field, validator, computed_field
@@ -109,7 +112,7 @@ class VectorDBSettings(BaseSettings):
     API_KEY: str = Field(default="", description="Pinecone API key")
     ENVIRONMENT: str = Field(default="", description="Pinecone environment")
     INDEX_NAME: str = Field(default="healthconnect-rag", description="Pinecone index name")
-    DIMENSION: int = Field(default=1536, description="Vector dimension")
+    DIMENSION: int = Field(default=768, description="Vector dimension")
     METRIC: str = Field(default="cosine", description="Similarity metric")
     CLOUD: str = Field(default="aws", description="Cloud provider")
     REGION: str = Field(default="us-west-2", description="Cloud region")
@@ -147,8 +150,8 @@ class RAGSettings(BaseSettings):
     CHUNK_OVERLAP: int = Field(default=77, description="Chunk overlap in tokens (15%)")
     TOP_K_RETRIEVAL: int = Field(default=5, description="Number of chunks to retrieve")
     EMBEDDING_MODEL: str = Field(
-        default="text-embedding-3-small",
-        description="Embedding model name"
+        default="sentence-transformers/all-MiniLM-L6-v2",
+        description="Embedding model name (Groq, Ollama, or local)"
     )
     RERANKER_MODEL: str = Field(
         default="cross-encoder/ms-marco-MiniLM-L-6-v2",
@@ -225,7 +228,117 @@ class MonitoringSettings(BaseSettings):
     GRAFANA_ADMIN_PASSWORD: str = Field(default="admin", description="Grafana admin password")
 
 
+
+class HuggingFaceSettings(BaseSettings):
+    """Hugging Face configuration settings"""
+    
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        env_prefix="HUGGINGFACE_",
+        extra="ignore",
+        case_sensitive=False,
+    )
+    
+    API_KEY: str = Field(default="", description="Hugging Face API key")
+    MODEL: str = Field(
+        default="mistralai/Mistral-7B-Instruct-v0.2",
+        description="Hugging Face model name"
+    )
+    EMBEDDING_MODEL: str = Field(
+        default="sentence-transformers/all-MiniLM-L6-v2",
+        description="Hugging Face embedding model"
+    )
+    MAX_TOKENS: int = Field(default=512, description="Maximum tokens for response")
+    TEMPERATURE: float = Field(default=0.3, description="Temperature for generation")
+    
+    @property
+    def is_configured(self) -> bool:
+        """Check if Hugging Face is configured"""
+        return bool(self.API_KEY)
+
+
+class OllamaSettings(BaseSettings):
+    """Ollama configuration settings"""
+    
+    model_config = SettingsConfigDict(env_prefix="OLLAMA_", extra="ignore")
+    
+    BASE_URL: str = Field(default="http://localhost:11434", description="Ollama base URL")
+    MODEL: str = Field(default="llama3.1", description="Ollama model name")
+    EMBEDDING_MODEL: str = Field(default="nomic-embed-text", description="Ollama embedding model")
+    
+    @property
+    def is_configured(self) -> bool:
+        """Check if Ollama is configured"""
+        return bool(self.BASE_URL)
+
+
+
+class GroqSettings(BaseSettings):
+    """Groq configuration settings"""
+    
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        env_prefix="GROQ_",
+        extra="ignore",
+        case_sensitive=False,
+    )
+    
+    API_KEY: str = Field(default="", description="Groq API key")
+    MODEL: str = Field(default="llama-3.1-8b-instant", description="Groq model name")
+    MAX_TOKENS: int = Field(default=512, description="Maximum tokens for response")
+    TEMPERATURE: float = Field(default=0.3, description="Temperature for generation")
+    
+    @property
+    def is_configured(self) -> bool:
+        """Check if Groq is configured"""
+        return bool(self.API_KEY)
+
+
+
+class GroqSettings(BaseSettings):
+    """Groq configuration settings"""
+    
+    model_config = SettingsConfigDict(env_prefix="GROQ_", extra="ignore")
+    
+    API_KEY: str = Field(default="", description="Groq API key")
+    MODEL: str = Field(
+        default="llama-3.1-70b-versatile",
+        description="Groq model name"
+    )
+    EMBEDDING_MODEL: str = Field(
+        default="llama-3.1-8b-instant",
+        description="Groq embedding model"
+    )
+    MAX_TOKENS: int = Field(default=1024, description="Maximum tokens for response")
+    TEMPERATURE: float = Field(default=0.3, description="Temperature for generation")
+    
+    @property
+    def is_configured(self) -> bool:
+        """Check if Groq is configured"""
+        return bool(self.API_KEY)
+
+
+class OllamaSettings(BaseSettings):
+    """Ollama configuration settings"""
+    
+    model_config = SettingsConfigDict(env_prefix="OLLAMA_", extra="ignore")
+    
+    BASE_URL: str = Field(default="http://localhost:11434", description="Ollama base URL")
+    MODEL: str = Field(default="llama3.1", description="Ollama model name")
+    EMBEDDING_MODEL: str = Field(default="nomic-embed-text", description="Ollama embedding model")
+    
+    @property
+    def is_configured(self) -> bool:
+        """Check if Ollama is configured"""
+        return bool(self.BASE_URL)
+
+
 class Settings(BaseSettings):
+
+
+
     """
     Main application settings aggregating all configuration categories.
     
@@ -269,6 +382,11 @@ class Settings(BaseSettings):
     safety: SafetySettings = Field(default_factory=SafetySettings)
     rate_limit: RateLimitSettings = Field(default_factory=RateLimitSettings)
     monitoring: MonitoringSettings = Field(default_factory=MonitoringSettings)
+    groq: GroqSettings = Field(default_factory=GroqSettings)
+    ollama: OllamaSettings = Field(default_factory=OllamaSettings)
+    huggingface: HuggingFaceSettings = Field(default_factory=HuggingFaceSettings)
+    ollama: OllamaSettings = Field(default_factory=OllamaSettings)
+    groq: GroqSettings = Field(default_factory=GroqSettings)
     
     @property
     def is_production(self) -> bool:

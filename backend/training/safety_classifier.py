@@ -68,10 +68,9 @@ class SafetyClassifierTrainer:
         texts = [item["text"] for item in train_data]
         labels = [item["label"] for item in train_data]
         
-        # Create label mapping
+        # Create label mapping from TRAINING data only
         unique_labels = sorted(set(labels))
         self.label_mapping = {label: i for i, label in enumerate(unique_labels)}
-        reverse_mapping = {i: label for label, i in self.label_mapping.items()}
         
         y = [self.label_mapping[label] for label in labels]
         
@@ -109,16 +108,40 @@ class SafetyClassifierTrainer:
         if val_data:
             val_texts = [item["text"] for item in val_data]
             val_labels = [item["label"] for item in val_data]
-            val_y = [self.label_mapping.get(label, -1) for label in val_labels]
             
-            val_X = self.vectorizer.transform(val_texts)
-            val_pred = self.classifier.predict(val_X)
+            # Filter validation labels to only those seen in training
+            valid_indices = [
+                i for i, label in enumerate(val_labels)
+                if label in self.label_mapping
+            ]
             
-            val_accuracy = accuracy_score(val_y, val_pred)
-            results["val_accuracy"] = val_accuracy
+            val_texts_filtered = [val_texts[i] for i in valid_indices]
+            val_labels_filtered = [val_labels[i] for i in valid_indices]
             
-            report = classification_report(val_y, val_pred, target_names=unique_labels, output_dict=True)
-            results["classification_report"] = report
+            if val_texts_filtered:
+                val_y = [self.label_mapping[label] for label in val_labels_filtered]
+                
+                val_X = self.vectorizer.transform(val_texts_filtered)
+                val_pred = self.classifier.predict(val_X)
+                
+                val_accuracy = accuracy_score(val_y, val_pred)
+                results["val_accuracy"] = val_accuracy
+                
+                val_unique_labels = sorted(set(val_labels_filtered))
+                
+                report = classification_report(
+                    val_y,
+                    val_pred,
+                    labels=[self.label_mapping[l] for l in val_unique_labels],
+                    target_names=val_unique_labels,
+                    output_dict=True,
+                    zero_division=0,
+                )
+                results["classification_report"] = report
+                logger.info(f"Validation accuracy: {val_accuracy:.4f}")
+            else:
+                results["val_accuracy"] = 0.0
+                logger.warning("No validation samples with known labels")
         
         return results
     
@@ -139,7 +162,7 @@ class SafetyClassifierTrainer:
         prediction = self.classifier.predict(X)[0]
         
         reverse_mapping = {i: label for label, i in self.label_mapping.items()}
-        category = reverse_mapping[prediction]
+        category = reverse_mapping.get(prediction, "safe")
         
         # Get probability
         probabilities = self.classifier.predict_proba(X)[0]

@@ -83,7 +83,7 @@ class ChatResponse(BaseModel):
     intent_confidence: float = Field(..., ge=0, le=1, description="Intent confidence")
     safety_category: str = Field(..., description="Safety classification")
     safety_score: float = Field(..., ge=0, le=1, description="Safety score")
-    action_performed: Optional[str] = Field(default=None, description="Action performed")
+    action_performed: Optional[Any] = Field(default=None, description="Action performed (string or dict)")
     requires_human: bool = Field(default=False, description="Whether human intervention needed")
     citations: List[Dict[str, str]] = Field(default_factory=list, description="Source citations")
     timestamp: datetime = Field(default_factory=datetime.utcnow, description="Response timestamp")
