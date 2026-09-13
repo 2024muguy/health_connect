@@ -62,6 +62,25 @@ class Orchestrator:
         self._pipeline_results: Dict[str, Dict[str, Any]] = {}
         self._conversation_start_times: Dict[str, float] = {}
         
+        # Initialize LLM provider for agents
+        try:
+            from app.llm.groq_provider import GroqProvider
+            from app.llm.base import LLMConfig
+            
+            config = LLMConfig(
+                provider="groq",
+                api_key=settings.groq.API_KEY,
+                model=settings.groq.MODEL,
+                max_tokens=settings.groq.MAX_TOKENS,
+                temperature=settings.groq.TEMPERATURE,
+                timeout=60,
+            )
+            self.llm_provider = GroqProvider(config)
+            logger.info("✅ Groq provider initialized for orchestrator")
+        except Exception as e:
+            logger.warning(f"Groq provider init failed: {e}")
+            self.llm_provider = None
+        
         logger.info("Orchestrator initialized")
     
     def register_agent(self, agent: BaseAgent) -> None:
@@ -71,6 +90,10 @@ class Orchestrator:
         Args:
             agent: Agent to register
         """
+        # Set LLM provider if available
+        if hasattr(self, 'llm_provider') and self.llm_provider:
+            agent.set_llm_provider(self.llm_provider)
+        
         self.agents[agent.agent_type] = agent
         logger.info(f"Registered agent: {agent.agent_type.value}")
     
@@ -174,9 +197,9 @@ class Orchestrator:
             action_result=action_result,
         )
         
-        # Store pipeline results
+        # Store pipeline results (handle None results)
         self._pipeline_results[context.conversation_id] = {
-            stage.value: result.to_dict()
+            stage.value: result.to_dict() if result else None
             for stage, result in pipeline_results.items()
         }
         
@@ -291,9 +314,37 @@ class Orchestrator:
         action_result: Optional[AgentResult],
     ) -> AgentResult:
         """Stage 6: Assemble final response"""
+        final_intent = intent_result.output.get("intent", "unknown")
+        response_text = generation_result.output.get("response", "")
+
+        # --- Week 6 improvement: force human handoff for escalation intents ---
+        ESCALATION_INTENTS = {"escalation_request", "feedback", "complaint"}
+        DISPUTE_KEYWORDS = (
+            "charged incorrectly", "wrong bill", "incorrect charge",
+            "refund", "overcharged", "billing error", "dispute",
+        )
+        is_dispute = (
+            final_intent == "billing_query"
+            and any(k in (context.query or "").lower() for k in DISPUTE_KEYWORDS)
+        )
+        force_human = (final_intent in ESCALATION_INTENTS) or is_dispute
+
+        # If escalation is required and the LLM didn't already produce
+        # an escalation-style message, replace the response.
+        ESCALATION_LANGUAGE = (
+            "human", "agent", "representative", "staff member",
+            "team member", "transfer", "escalat", "connect you",
+        )
+        if force_human and not any(k in response_text.lower() for k in ESCALATION_LANGUAGE):
+            response_text = (
+                "I understand \u2014 let me connect you with a HealthConnect staff member "
+                "who can help with this directly. A representative will reach out shortly. "
+                "You can also call the clinic directly during opening hours."
+            )
+
         response_data = {
-            "text": generation_result.output.get("response", ""),
-            "intent": intent_result.output.get("intent", "unknown"),
+            "text": response_text,
+            "intent": final_intent,
             "intent_confidence": intent_result.confidence,
             "safety_category": safety_result.output.get("safety_category", "safe"),
             "safety_score": safety_result.output.get("safety_score", 1.0),
@@ -302,8 +353,10 @@ class Orchestrator:
             "citations": generation_result.output.get("citations", []),
             "action_performed": action_result.output if action_result else None,
             "requires_human": (
-                action_result.output.get("requires_human", False)
-                if action_result else False
+                True if force_human else (
+                    action_result.output.get("requires_human", False)
+                    if action_result else False
+                )
             ),
         }
         
@@ -372,9 +425,20 @@ class Orchestrator:
         safety_category = safety_result.output.get("safety_category", "unknown")
         
         block_messages = {
+            "emergency": (
+                "\u26a0\ufe0f This may be a medical emergency. "
+                "Please call 911 (or 999 / 112 in your region) or go to the nearest "
+                "emergency room immediately. Do not wait for a response from this assistant.\n\n"
+                "For non-emergency urgent care, contact HealthConnect Clinic's urgent care "
+                "line during business hours."
+            ),
             "medical_advice_request": (
-                "I apologize, but I'm not able to provide medical advice. "
-                "For medical questions, please contact your healthcare provider directly."
+                "I'm not able to provide medical advice, diagnoses, or medication "
+                "recommendations. Please contact your healthcare provider directly. "
+                "If your symptoms are severe or urgent (for example chest pain, difficulty "
+                "breathing, severe bleeding, or a suspected stroke), call your local "
+                "emergency number (911 / 999 / 112) or go to the nearest emergency "
+                "room immediately."
             ),
             "pii_request": (
                 "I'm not able to access or share personal information through this assistant. "

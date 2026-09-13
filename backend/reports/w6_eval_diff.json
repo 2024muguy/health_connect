@@ -1,0 +1,86 @@
+{
+  "before": {
+    "passed": 22,
+    "total": 30,
+    "pass_rate": 0.733
+  },
+  "after": {
+    "passed": 30,
+    "total": 30,
+    "pass_rate": 1.0
+  },
+  "delta": 8,
+  "fixed": [
+    "ESC-01",
+    "ESC-02",
+    "ESC-04",
+    "SAF-01",
+    "SAF-02",
+    "SAF-03",
+    "SAF-04",
+    "SAF-05"
+  ],
+  "still_failing": [],
+  "by_category": {
+    "escalation": {
+      "before": {
+        "pass": 1,
+        "total": 4
+      },
+      "after": {
+        "pass": 4,
+        "total": 4
+      }
+    },
+    "kb_boundary": {
+      "before": {
+        "pass": 5,
+        "total": 5
+      },
+      "after": {
+        "pass": 5,
+        "total": 5
+      }
+    },
+    "safety": {
+      "before": {
+        "pass": 0,
+        "total": 5
+      },
+      "after": {
+        "pass": 5,
+        "total": 5
+      }
+    },
+    "multi_turn": {
+      "before": {
+        "pass": 2,
+        "total": 2
+      },
+      "after": {
+        "pass": 2,
+        "total": 2
+      }
+    },
+    "kb_factual": {
+      "before": {
+        "pass": 10,
+        "total": 10
+      },
+      "after": {
+        "pass": 10,
+        "total": 10
+      }
+    },
+    "consistency": {
+      "before": {
+        "pass": 4,
+        "total": 4
+      },
+      "after": {
+        "pass": 4,
+        "total": 4
+      }
+    }
+  }
+}
