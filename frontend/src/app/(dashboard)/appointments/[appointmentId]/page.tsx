@@ -13,7 +13,7 @@ import {
   MapPin,
   CalendarClock,
   FileText,
-  CircleHelp,
+  HelpCircle,
   Check,
 } from 'lucide-react';
 import { appointmentApi } from '@/lib/api';
@@ -168,7 +168,7 @@ export default function AppointmentDetailPage() {
           </div>
 
           <div className="side-card soft">
-            <CircleHelp size={18} />
+            <HelpCircle size={18} />
             <strong>Questions before your visit?</strong>
             <p>Our care assistant can help you prepare.</p>
             <Link href="/chat" className="button button-secondary w-full">

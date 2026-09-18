@@ -9,7 +9,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.api.deps import get_chat_service, get_optional_user
+from app.api.deps import get_chat_service, get_optional_user, get_current_user
 from app.schemas.chat import (
     ChatRequest,
     ChatResponse,
@@ -20,6 +20,29 @@ from config.logging_config import get_logger
 logger = get_logger(__name__)
 
 router = APIRouter()
+
+
+
+
+def _clean_text(text: str) -> str:
+    """Fix common mojibake and normalize punctuation."""
+    if not text:
+        return text
+    replacements = {
+        '\u00e2\u20ac\u2018': "'",   # ' (left single quote)
+        '\u00e2\u20ac\u2019': "'",   # ' (right single quote)
+        '\u00e2\u20ac\u201c': '"',   # " (left double)
+        '\u00e2\u20ac\u009d': '"',   # " (right double)
+        '\u00e2\u20ac\u2013': '\u2013',   # en dash
+        '\u00e2\u20ac\u2014': '\u2014',   # em dash
+        '\u00c3\u00a9': 'é',
+        '\u00c3\u00a8': 'è',
+    }
+    for bad, good in replacements.items():
+        text = text.replace(bad, good)
+    # Replace any remaining non-printable control chars
+    text = ''.join(ch for ch in text if ch == '\n' or ch == '\t' or ord(ch) >= 32)
+    return text
 
 
 @router.post("/message", response_model=ChatResponse)
@@ -103,7 +126,7 @@ async def send_message(
         chat_response = ChatResponse(
             message_id=message_id,
             conversation_id=conversation_id,
-            response=str(response_text),
+            response=_clean_text(str(response_text)),
             intent=str(intent),
             intent_confidence=float(response_data.get("intent_confidence", 0.5)),
             safety_category=str(safety_category),
@@ -122,3 +145,58 @@ async def send_message(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to process message",
         )
+
+
+# ============================================
+# Conversation Management Endpoints
+# ============================================
+
+@router.get("/conversations")
+async def list_conversations(
+    current_user: dict = Depends(get_current_user),
+):
+    """List conversations for the current user."""
+    from app.services.chat_service import ChatService
+    service = ChatService()
+    conversations = await service.get_active_conversations()
+    return {
+        "conversations": conversations,
+        "total": len(conversations),
+    }
+
+
+@router.get("/conversations/{conversation_id}")
+async def get_conversation(
+    conversation_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Get a conversation by ID with its messages."""
+    from app.services.chat_service import ChatService
+    service = ChatService()
+    history = await service.get_conversation_history(conversation_id, limit=100)
+
+    if not history:
+        # Return an empty conversation instead of 404 so the frontend can start fresh
+        return {
+            "conversation_id": conversation_id,
+            "messages": [],
+            "total": 0,
+        }
+
+    return {
+        "conversation_id": conversation_id,
+        "messages": history,
+        "total": len(history),
+    }
+
+
+@router.delete("/conversations/{conversation_id}")
+async def delete_conversation(
+    conversation_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Delete (end) a conversation."""
+    from app.services.chat_service import ChatService
+    service = ChatService()
+    result = await service.end_conversation(conversation_id)
+    return result

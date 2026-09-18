@@ -18,6 +18,7 @@ interface MessageBubbleProps {
 export function MessageBubble({ message, isStreaming = false, className }: MessageBubbleProps) {
   const isUser = message.role === 'user';
   const isAssistant = message.role === 'assistant';
+  const citations = message.citations ?? [];
 
   return (
     <div
@@ -48,9 +49,9 @@ export function MessageBubble({ message, isStreaming = false, className }: Messa
           {formatTime(message.timestamp)}
         </span>
 
-        {message.citations && message.citations.length > 0 && (
+        {process.env.NODE_ENV === 'development' && false && citations.length > 0 && (
           <div className="citations">
-            {message.citations.map((citation, index) => (
+            {citations.map((citation, index) => (
               <span key={index}>
                 <FileText size={12} />
                 {citation.formatted || citation.chunk_id}
@@ -59,7 +60,7 @@ export function MessageBubble({ message, isStreaming = false, className }: Messa
           </div>
         )}
 
-        {message.intent && isAssistant && (
+        {process.env.NODE_ENV === 'development' && false && message.intent && isAssistant && (
           <span className="text-[8px] font-mono text-muted-foreground/60 mt-1 block">
             intent: {message.intent}
           </span>

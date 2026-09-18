@@ -15,6 +15,40 @@ import { useToast } from '@/hooks/useToast';
 import { clinicApi } from '@/lib/api';
 import type { ClinicService } from '@/types';
 
+const SERVICE_DURATIONS: Record<string, number> = {
+  'General outpatient consultations': 30,
+  'Follow-up consultations': 20,
+  'Selected specialist consultations': 45,
+  'Diagnostic and routine laboratory services': 15,
+  'Preventive health and wellness consultations': 30,
+};
+
+const SERVICE_DESCRIPTIONS: Record<string, string> = {
+  'General outpatient consultations': 'Initial consultation with a general practitioner.',
+  'Follow-up consultations': 'Follow-up visit for ongoing care.',
+  'Selected specialist consultations': 'Specialist visit (by appointment only).',
+  'Diagnostic and routine laboratory services': 'Lab tests and diagnostics.',
+  'Preventive health and wellness consultations': 'Wellness check and preventive care.',
+};
+
+function normalizeService(raw: any, index: number): { id: string; name: string; description: string; duration: number } {
+  if (typeof raw === 'string') {
+    return {
+      id: `svc-${index}-${raw.toLowerCase().replace(/\s+/g, '-').slice(0, 30)}`,
+      name: raw,
+      description: SERVICE_DESCRIPTIONS[raw] || '',
+      duration: SERVICE_DURATIONS[raw] || 30,
+    };
+  }
+  return {
+    id: raw?.id ?? `svc-${index}`,
+    name: raw?.name ?? String(raw),
+    description: raw?.description ?? '',
+    duration: raw?.duration ?? 30,
+  };
+}
+
+
 export default function NewAppointmentPage() {
   const router = useRouter();
   const { toast } = useToast();
@@ -36,7 +70,11 @@ export default function NewAppointmentPage() {
     const loadServices = async () => {
       try {
         const data = await clinicApi.getServices();
-        setServices(data as unknown as ClinicService[]);
+        const rawList: any[] = Array.isArray(data)
+          ? data
+          : ((data as any)?.services ?? []);
+        const list: ClinicService[] = rawList.map((s, i) => normalizeService(s, i) as any);
+        setServices(list);
       } catch {
         toast('Failed to load services.', 'error');
       }

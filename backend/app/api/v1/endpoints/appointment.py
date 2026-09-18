@@ -45,7 +45,7 @@ async def create_appointment(
     Create a new appointment.
     """
     result = await appointment_service.create_appointment(
-        patient_id=str(request.patient_id),
+        patient_id=request.patient_id,   # UUID object, not str
         appointment_type=request.appointment_type.value,
         scheduled_datetime=request.scheduled_datetime,
         duration_minutes=request.duration_minutes,

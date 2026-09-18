@@ -16,6 +16,7 @@ from typing import Optional, List
 import enum
 
 from sqlalchemy import (
+    Text,
     Column,
     String,
     DateTime,
@@ -74,7 +75,7 @@ class Conversation(BaseModel):
     # Foreign Keys
     # ============================================
     patient_id = Column(
-        UUID(as_uuid=True),
+        String(64),
         ForeignKey("patients.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
@@ -136,6 +137,12 @@ class Conversation(BaseModel):
         Text,
         nullable=True,
         comment="Auto-generated conversation summary",
+    )
+
+    facts_json = Column(
+        Text,
+        nullable=True,
+        comment="Structured facts extracted from the conversation (JSON)",
     )
     
     conversation_model_metadata = Column(

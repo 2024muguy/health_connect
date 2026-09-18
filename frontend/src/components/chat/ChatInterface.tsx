@@ -18,6 +18,8 @@ import { CHAT_CONSTANTS } from '@/lib/constants';
 import { cn } from '@/lib/utils';
 
 interface ChatInterfaceProps {
+  onNewConversation?: () => void;
+  onDelete?: () => Promise<void>;
   conversationId?: string;
   patientName?: string;
   className?: string;
@@ -108,16 +110,16 @@ export function ChatInterface({
       {messages.length === 0 && !isSending && (
         <div className="px-5 pb-3">
           <QuickReplies
-            replies={CHAT_CONSTANTS.QUICK_REPLIES}
+            replies={[...CHAT_CONSTANTS.QUICK_REPLIES]}
             onReply={handleQuickReply}
-            disabled={!isConnected}
+            disabled={false}
           />
         </div>
       )}
 
       <MessageInput
         onSend={handleSend}
-        disabled={isSending || !isConnected}
+        disabled={isSending}
         textareaRef={textareaRef}
       />
 

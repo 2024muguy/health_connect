@@ -106,14 +106,22 @@ class Appointment(BaseModel, SoftDeleteMixin):
     # Appointment Details
     # ============================================
     appointment_type = Column(
-        Enum(AppointmentType, name="appointment_type_enum"),
+        Enum(
+            AppointmentType,
+            name="appointment_type_enum",
+            values_callable=lambda x: [e.value for e in x],
+        ),
         nullable=False,
         default=AppointmentType.GENERAL,
         comment="Type of appointment",
     )
     
     status = Column(
-        Enum(AppointmentStatus, name="appointment_status_enum"),
+        Enum(
+            AppointmentStatus,
+            name="appointment_status_enum",
+            values_callable=lambda x: [e.value for e in x],
+        ),
         nullable=False,
         default=AppointmentStatus.SCHEDULED,
         index=True,

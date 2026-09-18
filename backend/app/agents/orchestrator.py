@@ -252,6 +252,22 @@ class Orchestrator:
         context: AgentContext,
     ) -> AgentResult:
         """Stage 3: Knowledge Retrieval"""
+        _SHORT = {
+            "yes", "yep", "yeah", "yup", "sure", "ok", "okay", "k",
+            "no", "nope", "nah", "n",
+            "please", "please do", "go ahead", "yes please",
+            "sounds good", "alright", "fine",
+        }
+        q = (context.query or "").strip().lower().rstrip(".!?,")
+        if q in _SHORT:
+            logger.info(f"Skipping retrieval for short follow-up: {context.query!r}")
+            return AgentResult(
+                agent_type=AgentType.KNOWLEDGE,
+                status=AgentStatus.COMPLETED,
+                output={"chunks": [], "sources": []},
+                confidence=0.0,
+            )
+
         agent = self.get_agent(AgentType.KNOWLEDGE)
         
         if not agent:
@@ -426,27 +442,40 @@ class Orchestrator:
         
         block_messages = {
             "emergency": (
-                "\u26a0\ufe0f This may be a medical emergency. "
+                "\u26a0\ufe0f This may be a medical emergency.\n\n"
                 "Please call 911 (or 999 / 112 in your region) or go to the nearest "
-                "emergency room immediately. Do not wait for a response from this assistant.\n\n"
-                "For non-emergency urgent care, contact HealthConnect Clinic's urgent care "
-                "line during business hours."
+                "emergency room right away. Do not wait for a response from this assistant.\n\n"
+                "For non-emergency urgent care, you can contact HealthConnect Clinic's "
+                "urgent care line during opening hours."
             ),
             "medical_advice_request": (
-                "I'm not able to provide medical advice, diagnoses, or medication "
-                "recommendations. Please contact your healthcare provider directly. "
-                "If your symptoms are severe or urgent (for example chest pain, difficulty "
-                "breathing, severe bleeding, or a suspected stroke), call your local "
-                "emergency number (911 / 999 / 112) or go to the nearest emergency "
-                "room immediately."
+                "I can't give medical advice or diagnose symptoms — that needs a "
+                "clinician who knows your situation.\n\n"
+                "What I can do:\n"
+                "\u2022 Book a consultation with a HealthConnect clinician\n"
+                "\u2022 Share clinic hours, services, and locations\n\n"
+                "If this feels urgent or time-sensitive (for example labor, severe pain, "
+                "difficulty breathing, or sudden symptoms), please call HealthConnect "
+                "Clinic directly or call 911 / 999 / 112 if it's an emergency.\n\n"
+                "Would you like help booking an appointment?"
             ),
             "pii_request": (
-                "I'm not able to access or share personal information through this assistant. "
-                "Please contact our clinic directly for assistance with personal records."
+                "I can't access or share personal or medical records through this "
+                "assistant. For anything involving your personal information, please "
+                "contact HealthConnect Clinic directly and they'll be glad to help.\n\n"
+                "Is there anything else I can help you with in the meantime?"
             ),
             "abusive_language": (
-                "I'm here to help with administrative tasks and clinic information. "
-                "Please let me know how I can assist you professionally."
+                "I'm here to help with clinic information and appointment tasks. "
+                "Let me know how I can assist you."
+            ),
+            "out_of_scope": (
+                "HealthConnect's assistant doesn't cover that topic, and I'm not able "
+                "to give medical advice about specific conditions. For any concern "
+                "about a specific condition, please:\n\n"
+                "\u2022 Book a consultation with a HealthConnect clinician\n"
+                "\u2022 In an emergency, call 911 / 999 / 112 immediately\n\n"
+                "Would you like help booking an appointment?"
             ),
         }
         

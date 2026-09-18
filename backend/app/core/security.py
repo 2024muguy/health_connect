@@ -1,3 +1,6 @@
+from config.logging_config import get_logger
+logger = get_logger(__name__)
+from app.core.exceptions import TokenExpiredError, TokenInvalidError
 """
 HealthConnect AI - Security Core
 =================================
@@ -142,43 +145,33 @@ class SecurityManager:
     def decode_token(self, token: str) -> Dict[str, Any]:
         """
         Decode and validate a JWT token.
-        
-        Args:
-            token: JWT token
-            
-        Returns:
-            Dict: Token payload
-            
-        Raises:
-            TokenExpiredError: If token has expired
-            TokenInvalidError: If token is invalid
+        Returns empty dict on any error (defensive).
         """
         try:
-            payload = jwt.decode(token, self.secret_key, algorithms=[JWT_ALGORITHM])
-            return payload
+            return jwt.decode(token, self.secret_key, algorithms=[JWT_ALGORITHM])
         except jwt.ExpiredSignatureError:
-            raise TokenExpiredError()
-        except JWTError:
-            raise TokenInvalidError()
-    
+            logger.debug("Token expired")
+            return {}
+        except JWTError as e:
+            logger.debug(f"Invalid token: {e}")
+            return {}
+        except Exception as e:
+            logger.debug(f"decode_token failed: {type(e).__name__}: {e}")
+            return {}
+
     def verify_token(self, token: str, expected_type: str = "access") -> Dict[str, Any]:
         """
         Verify token and check type.
-        
-        Args:
-            token: JWT token
-            expected_type: Expected token type
-            
-        Returns:
-            Dict: Token payload
+        Returns empty dict on any error (defensive).
         """
         payload = self.decode_token(token)
-        
+        if not payload:
+            return {}
         if payload.get("type") != expected_type:
-            raise TokenInvalidError()
-        
+            logger.debug(f"Token type mismatch: expected {expected_type}, got {payload.get('type')}")
+            return {}
         return payload
-    
+
     # ============================================
     # Data Encryption
     # ============================================

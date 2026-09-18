@@ -1,7 +1,7 @@
 """
 HealthConnect AI - Database Session
 ====================================
-Database session management for SQLAlchemy.
+Database session management for SQLAlchemy (sync + async).
 """
 
 import os
@@ -9,13 +9,16 @@ from typing import Generator, AsyncGenerator
 from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import sessionmaker, Session
+
 from config.logging_config import get_logger
 from config.settings import get_settings
 
 logger = get_logger(__name__)
 settings = get_settings()
 
-# Get database URL
+# ============================================
+# Database URLs
+# ============================================
 database_url = os.getenv("NEON_DATABASE_URL", "") or os.getenv("DATABASE_URL", "")
 
 if not database_url:
@@ -25,27 +28,46 @@ if not database_url:
 # Convert to async URL
 if database_url.startswith("postgresql://"):
     async_database_url = database_url.replace("postgresql://", "postgresql+asyncpg://")
+elif database_url.startswith("postgres://"):
+    async_database_url = database_url.replace("postgres://", "postgresql+asyncpg://")
 elif database_url.startswith("sqlite:///"):
     async_database_url = database_url.replace("sqlite:///", "sqlite+aiosqlite:///")
 else:
     async_database_url = database_url
 
-logger.info(f"Using database: {async_database_url.split('@')[-1] if '@' in async_database_url else async_database_url}")
+safe_url = async_database_url.split("@")[-1] if "@" in async_database_url else async_database_url
+logger.info(f"Using database: {safe_url}")
 
-# Synchronous engine
+# ============================================
+# Sync engine (for migrations/sync operations)
+# ============================================
 engine = create_engine(database_url, pool_pre_ping=True, echo=settings.database.ECHO)
 
-# Session factories
-SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
-AsyncSessionLocal = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
-
-# Async engine
+# ============================================
+# Async engine (for FastAPI endpoints)
+# ============================================
 async_engine = create_async_engine(async_database_url, pool_pre_ping=True, echo=settings.database.ECHO)
 
-# For backwards compatibility
-Base = None  # Will be set by models
+# ============================================
+# Session factories
+# ============================================
+SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
+AsyncSessionLocal = async_sessionmaker(
+    bind=async_engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+)
 
+# Base for backwards compatibility
+try:
+    from app.models.base import Base  # noqa: F401
+except Exception:
+    Base = None
+
+# ============================================
+# Dependency helpers
+# ============================================
 def get_session() -> Generator[Session, None, None]:
     """Get synchronous database session."""
     session = SessionLocal()

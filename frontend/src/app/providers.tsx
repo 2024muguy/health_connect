@@ -7,7 +7,6 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import { ErrorBoundary } from '@/components/shared/ErrorBoundary';
 
 export function Providers({ children }: { children: ReactNode }) {
-  // useState ensures each request gets its own QueryClient
   const [queryClient] = useState(
     () =>
       new QueryClient({
@@ -18,16 +17,14 @@ export function Providers({ children }: { children: ReactNode }) {
             refetchOnWindowFocus: false,
           },
         },
-      })
+      }),
   );
 
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <ErrorBoundary>
-          {children}
-        </ErrorBoundary>
-        <Toaster />
+        <ErrorBoundary>{children}</ErrorBoundary>
+        <Toaster>{null}</Toaster>
       </TooltipProvider>
     </QueryClientProvider>
   );

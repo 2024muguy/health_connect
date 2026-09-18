@@ -134,10 +134,10 @@ def get_chat_service():
     return ChatService()
 
 
-def get_appointment_service():
-    """Get appointment service instance"""
+def get_appointment_service(db: Session = Depends(get_session)):
+    """Get appointment service instance with a DB session."""
     from app.services.appointment_service import AppointmentService
-    return AppointmentService()
+    return AppointmentService(db=db)
 
 
 def get_escalation_service():

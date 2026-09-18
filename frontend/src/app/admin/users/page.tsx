@@ -20,6 +20,7 @@ import { getInitials } from '@/lib/utils';
 
 interface AdminUser {
   id: string;
+  user_id: string;
   firstName: string;
   lastName: string;
   email: string;

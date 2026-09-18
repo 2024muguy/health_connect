@@ -2,7 +2,6 @@ import type { Metadata, Viewport } from 'next';
 import { type ReactNode } from 'react';
 import { Providers } from './providers';
 // TypeScript may not have declarations for global CSS imports, but Next.js bundles this stylesheet.
-// @ts-expect-error Missing declaration for side-effect CSS import.
 import './globals.css';
 
 export const metadata: Metadata = {

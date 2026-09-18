@@ -44,8 +44,9 @@ export default function ChatPage() {
 
     try {
       const response = await sendMessage(newMessage.trim());
-      if (response?.conversation_id) {
-        router.push(`/chat/${response.conversation_id}`);
+      const convId = (response as any)?.conversation_id ?? (response as any)?.conversationId;
+      if (convId) {
+        router.push(`/chat/${convId}`);
       }
     } catch {
       // Error handled by hook

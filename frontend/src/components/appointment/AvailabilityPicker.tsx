@@ -25,7 +25,16 @@ export function AvailabilityPicker({
   isLoading = false,
   className,
 }: AvailabilityPickerProps) {
-  const availableSlots = availability.filter((slot) => slot.available);
+  const slotsArray = Array.isArray(availability)
+    ? availability
+    : (availability as any)?.available_slots
+      ?? (availability as any)?.availability
+      ?? (availability as any)?.slots
+      ?? [];
+
+  const availableSlots = slotsArray.filter(
+    (slot: AppointmentAvailability) => slot.available,
+  );
 
   if (isLoading) {
     return (
@@ -48,20 +57,21 @@ export function AvailabilityPicker({
 
   return (
     <div className={cn('time-grid', className)}>
-      {availableSlots.map((slot) => {
-        const slotKey = `${slot.time}-${slot.clinician}`;
+      {availableSlots.map((slot: AppointmentAvailability, idx: number) => {
+        const slotKey = `${slot.time}-${slot.doctor_id ?? 'any'}-${idx}`;
         const isSelected = selectedTime === slot.time;
+        const clinicianLabel = slot.clinician || 'Any clinician';
 
         return (
           <button
             type="button"
-            data-testid={`button-time-${slot.time.replaceAll(' ', '-')}`}
+            data-testid={`button-time-${slot.time.replaceAll(' ', '-').replaceAll(':', '-')}`}
             key={slotKey}
             className={cn('time-slot', isSelected && 'selected')}
             onClick={() => onTimeSelect(slot.time)}
           >
             <span>{slot.time}</span>
-            <small>{slot.clinician}</small>
+            <small>{clinicianLabel}</small>
             {isSelected && <Check size={14} />}
           </button>
         );

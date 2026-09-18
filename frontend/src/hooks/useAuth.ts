@@ -47,6 +47,8 @@ function normalizeUser(raw: any): UserProfile {
   };
 }
 
+let __authInitialCheckDone = false;
+
 export function useAuth(): UseAuthReturn {
   const router = useRouter();
   const { user, isAuthenticated, setUser, setTokens, clearAuth } = useAuthStore();
@@ -55,11 +57,20 @@ export function useAuth(): UseAuthReturn {
 
   // Check authentication on mount
   useEffect(() => {
+    if (__authInitialCheckDone) {
+      setIsLoading(false);
+      return;
+    }
+    __authInitialCheckDone = true;
+
     const checkAuth = async () => {
       const accessToken = getAccessToken();
       const refreshToken = getRefreshToken();
+      console.log('[checkAuth] accessToken?', !!accessToken, 'refreshToken?', !!refreshToken);
+      console.log('[checkAuth] raw hc_access_token:', localStorage.getItem('hc_access_token')?.slice(0, 20));
 
       if (!accessToken && !refreshToken) {
+        console.log('[checkAuth] No tokens — clearing auth');
         clearAuth();
         setIsLoading(false);
         return;

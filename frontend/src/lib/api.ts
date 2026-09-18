@@ -71,7 +71,7 @@ export const chatApi = {
 // ============================================
 export const appointmentApi = {
   list: (params?: { status?: string }) =>
-    apiClient.get<Appointment[]>(API_ENDPOINTS.APPOINTMENTS.LIST, { params }),
+    apiClient.get<any>(API_ENDPOINTS.APPOINTMENTS.LIST, { params }),
 
   create: (data: AppointmentCreate) =>
     apiClient.post<Appointment>(API_ENDPOINTS.APPOINTMENTS.CREATE, data),
@@ -89,7 +89,7 @@ export const appointmentApi = {
     apiClient.post(API_ENDPOINTS.APPOINTMENTS.CANCEL(id), { reason, confirm_cancellation: true }),
 
   getAvailability: (params: { date: string; service?: string }) =>
-    apiClient.get(API_ENDPOINTS.APPOINTMENTS.AVAILABILITY, { params }),
+    apiClient.get<any>(API_ENDPOINTS.APPOINTMENTS.AVAILABILITY, { params }),
 };
 
 // ============================================

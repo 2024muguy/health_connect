@@ -19,6 +19,7 @@ from typing import AsyncGenerator, Optional
 
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from app.middleware.request_limits import RequestLimitsMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
@@ -149,6 +150,7 @@ def create_app() -> FastAPI:
     # ============================================
     # CORS Middleware
     # ============================================
+    app.add_middleware(RequestLimitsMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins_list,
@@ -360,7 +362,13 @@ def create_app() -> FastAPI:
     # ============================================
     # Include API Router
     # ============================================
+    # Include API router
     app.include_router(api_router, prefix=settings.API_PREFIX)
+
+    # WebSocket route — must be registered directly on app for FastAPI
+    from app.api.v1.endpoints.ws_chat import router as ws_router
+    app.include_router(ws_router, prefix=settings.API_PREFIX)
+    logger.info("WebSocket route registered at {}/ws/chat/{{conversation_id}}".format(settings.API_PREFIX))
 
     logger.info(f"{APP_NAME} application created successfully")
     

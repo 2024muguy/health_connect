@@ -1,23 +1,14 @@
 """
-HealthConnect AI - Main API Router
-===================================
-Aggregates all API v1 endpoint routers.
-
-Endpoints:
-- /auth: Authentication
-- /chat: Chat/Conversation
-- /appointments: Appointment management
-- /clinic: Clinic information
-- /escalations: Escalation management
-- /admin: Admin operations
-- /analytics: Analytics
-- /webhooks: External webhooks
+HealthConnect AI - API v1 Router
+=================================
+Aggregates all v1 endpoints.
 """
 
 from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
     auth,
+    notifications,
     chat,
     appointment,
     clinic,
@@ -27,9 +18,10 @@ from app.api.v1.endpoints import (
     webhooks,
 )
 
+# WebSocket router — imported separately to avoid circular dependency
+
 api_router = APIRouter()
 
-# Include endpoint routers
 api_router.include_router(auth.router, prefix="/auth", tags=["Authentication"])
 api_router.include_router(chat.router, prefix="/chat", tags=["Chat"])
 api_router.include_router(appointment.router, prefix="/appointments", tags=["Appointments"])
@@ -38,3 +30,6 @@ api_router.include_router(escalation.router, prefix="/escalations", tags=["Escal
 api_router.include_router(admin.router, prefix="/admin", tags=["Admin"])
 api_router.include_router(analytics.router, prefix="/analytics", tags=["Analytics"])
 api_router.include_router(webhooks.router, prefix="/webhooks", tags=["Webhooks"])
+api_router.include_router(notifications.router, prefix="/notifications", tags=["Notifications"])
+
+# WebSocket (no prefix — matches /ws/chat/{id})

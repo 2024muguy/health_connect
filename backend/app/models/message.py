@@ -68,10 +68,11 @@ class Message(BaseModel):
     # Message Identification
     # ============================================
     message_code = Column(
-        String(20),
+        String(64),
         unique=True,
         nullable=False,
         index=True,
+        default=lambda: f"MSG-{uuid.uuid4().hex[:8].upper()}",
         comment="Unique message code (MSG-XXXXXXXX)",
     )
     
@@ -79,7 +80,7 @@ class Message(BaseModel):
     # Foreign Keys
     # ============================================
     conversation_id = Column(
-        UUID(as_uuid=True),
+        String(64),
         ForeignKey("conversations.id", ondelete="CASCADE"),
         nullable=False,
         index=True,

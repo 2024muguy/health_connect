@@ -1,3 +1,4 @@
+from app.services.patient_service import ensure_patient_profile
 """
 HealthConnect AI - Authentication Endpoints
 ============================================
@@ -82,6 +83,7 @@ class UserResponse(BaseModel):
     roles: list = []
 
 
+    patient_id: Optional[str] = None
 # ============================================
 # Endpoints
 # ============================================
@@ -242,16 +244,38 @@ async def get_me(
 
     if not user:
         # Token is valid but user was deleted — fall back to token claims
+        logger.warning(
+            f"/auth/me fallback: user not found for sub={current_user.get('sub')!r}. "
+            f"Token claims: {dict(current_user)}"
+        )
         return UserResponse(
             user_id=current_user.get("sub", ""),
             email=current_user.get("email", ""),
             full_name=current_user.get("full_name", current_user.get("email", "")),
             roles=current_user.get("roles", ["user"]),
+            patient_id=None,
         )
 
+    # Snapshot user fields BEFORE any DB write, so logging still works
+    # even if the session gets rolled back.
+    user_id = user.id
+    user_email = user.email
+    user_full_name = user.full_name
+    user_roles = (user.roles or "user").split(",")
+
+    # Ensure a linked patient profile exists (1:1) and expose its UUID.
+    patient_id = None
+    try:
+        _patient = ensure_patient_profile(db, user)
+        patient_id = str(_patient.id)   # coerce UUID → str for the response model
+    except Exception as e:  # noqa: BLE001
+        db.rollback()
+        logger.warning(f"Patient auto-provision failed for user {user_id}: {e}")
+
     return UserResponse(
-        user_id=user.id,
-        email=user.email,
-        full_name=user.full_name,
-        roles=(user.roles or "user").split(","),
+        user_id=user_id,
+        email=user_email,
+        full_name=user_full_name,
+        roles=user_roles,
+        patient_id=patient_id,
     )

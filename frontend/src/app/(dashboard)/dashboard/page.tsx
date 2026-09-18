@@ -1,6 +1,6 @@
 /**
  * HealthConnect AI - Dashboard Page
- * Main dashboard overview
+ * Compact, glance-able overview with links to detailed pages
  */
 
 'use client';
@@ -16,30 +16,29 @@ import {
   MessageCircle,
   MapPin,
   UserRound,
+  Stethoscope,
+  Navigation,
+  Gift,
 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { useAppointments } from '@/hooks/useAppointments';
 import { useChat } from '@/hooks/useChat';
-import { StatCard } from '@/components/dashboard/StatCard';
 import { UpcomingAppointments } from '@/components/dashboard/UpcomingAppointments';
 import { RecentConversations } from '@/components/dashboard/RecentConversations';
-import { EmptyState } from '@/components/shared/EmptyState';
+import { ClinicPreview } from '@/components/dashboard/ClinicPreview';
+import { MapPreview } from '@/components/dashboard/MapPreview';
+import { PromoPreview } from '@/components/dashboard/PromoPreview';
 import { Skeleton } from '@/components/ui/skeleton';
-import { formatDate } from '@/lib/utils';
 
 export default function DashboardPage() {
   const { user } = useAuth();
   const { upcomingAppointments, loadAppointments, isLoading: appointmentsLoading } = useAppointments();
   const { conversations, loadConversations } = useChat();
   const [isInitialLoading, setIsInitialLoading] = useState(true);
-  const conversationsLoading = isInitialLoading;
 
   useEffect(() => {
     const loadData = async () => {
-      await Promise.all([
-        loadAppointments('upcoming'),
-        loadConversations(),
-      ]);
+      await Promise.all([loadAppointments('upcoming'), loadConversations()]);
       setIsInitialLoading(false);
     };
     loadData();
@@ -74,18 +73,15 @@ export default function DashboardPage() {
       </div>
 
       <div className="dashboard-grid">
-        {/* Main Column */}
+        {/* ============================================================
+            MAIN COLUMN
+            ============================================================ */}
         <section className="dashboard-main">
           {/* Next Appointment */}
           <div className="section-heading">
             <h2>Your next appointment</h2>
-            <Link
-              href="/appointments"
-              className="text-link"
-              data-testid="link-see-all-appointments"
-            >
-              See all
-              <ArrowRight size={14} />
+            <Link href="/appointments" className="text-link">
+              See all <ArrowRight size={14} />
             </Link>
           </div>
 
@@ -102,24 +98,87 @@ export default function DashboardPage() {
           {/* Recent Conversations */}
           <div className="section-heading mt-8">
             <h2>Recent conversations</h2>
-            <Link
-              href="/chat"
-              className="text-link"
-              data-testid="link-view-conversations"
-            >
-              View conversations
-              <ArrowRight size={14} />
+            <Link href="/chat" className="text-link">
+              View all <ArrowRight size={14} />
             </Link>
           </div>
 
           <RecentConversations
             conversations={conversations}
-            isLoading={conversationsLoading}
-            maxItems={3}
+            isLoading={isInitialLoading}
+            maxItems={2}
           />
+
+          {/* Quick Access to Clinic, Map, Offers */}
+          <div className="section-heading mt-8">
+            <h2>Explore</h2>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Link
+              href="/clinic"
+              className="panel p-4 hover:border-primary/40 transition-colors group"
+            >
+              <div className="flex items-start justify-between mb-3">
+                <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center">
+                  <Stethoscope size={18} className="text-primary" />
+                </div>
+                <ArrowRight
+                  size={14}
+                  className="text-muted-foreground group-hover:text-primary transition-colors"
+                />
+              </div>
+              <h3 className="text-sm font-semibold">Clinic Info</h3>
+              <p className="text-[11px] text-muted-foreground mt-1 line-clamp-2">
+                Hours, services, and contact details
+              </p>
+            </Link>
+
+            <Link
+              href="/clinic#directions"
+              scroll={true}
+              className="panel p-4 hover:border-primary/40 transition-colors group"
+            >
+              <div className="flex items-start justify-between mb-3">
+                <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center">
+                  <Navigation size={18} className="text-primary" />
+                </div>
+                <ArrowRight
+                  size={14}
+                  className="text-muted-foreground group-hover:text-primary transition-colors"
+                />
+              </div>
+              <h3 className="text-sm font-semibold">Directions</h3>
+              <p className="text-[11px] text-muted-foreground mt-1 line-clamp-2">
+                Navigate to Ongata Rongai
+              </p>
+            </Link>
+
+            <Link
+              href="/clinic#offers"
+              scroll={true}
+              className="panel p-4 hover:border-primary/40 transition-colors group"
+            >
+              <div className="flex items-start justify-between mb-3">
+                <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center">
+                  <Gift size={18} className="text-primary" />
+                </div>
+                <ArrowRight
+                  size={14}
+                  className="text-muted-foreground group-hover:text-primary transition-colors"
+                />
+              </div>
+              <h3 className="text-sm font-semibold">Special Offers</h3>
+              <p className="text-[11px] text-muted-foreground mt-1 line-clamp-2">
+                Free screenings & promotions
+              </p>
+            </Link>
+          </div>
         </section>
 
-        {/* Right Rail */}
+        {/* ============================================================
+            RIGHT RAIL
+            ============================================================ */}
         <aside className="dashboard-rail">
           {/* Assistant Card */}
           <div className="assistant-card">
@@ -134,13 +193,8 @@ export default function DashboardPage() {
               Get clear answers about your care, anytime. Your assistant
               remembers the context so you do not have to repeat yourself.
             </p>
-            <Link
-              href="/chat"
-              className="button button-light"
-              data-testid="link-start-conversation"
-            >
-              Start a conversation
-              <ArrowRight size={15} />
+            <Link href="/chat" className="button button-light">
+              Start a conversation <ArrowRight size={15} />
             </Link>
           </div>
 
@@ -149,17 +203,15 @@ export default function DashboardPage() {
             <div className="stats-label">Your care, this year</div>
             <div className="stats-row">
               <div>
-                <strong data-testid="text-stat-visits">
-                  {upcomingAppointments.length}
-                </strong>
+                <strong>{upcomingAppointments.length}</strong>
                 <span>Visits</span>
               </div>
               <div>
-                <strong data-testid="text-stat-care-team">0</strong>
-                <span>Care team</span>
+                <strong>{conversations.length}</strong>
+                <span>Chats</span>
               </div>
               <div>
-                <strong data-testid="text-stat-documents">0</strong>
+                <strong>0</strong>
                 <span>Documents</span>
               </div>
             </div>
@@ -169,23 +221,29 @@ export default function DashboardPage() {
             </div>
           </div>
 
+          {/* Compact Clinic Preview */}
+          <ClinicPreview />
+
+          {/* Compact Map Preview */}
+          <MapPreview />
+
+          {/* Compact Promo Preview */}
+          <PromoPreview />
+
           {/* Quick Links */}
           <div className="quick-links">
             <span className="stats-label">Quick access</span>
-            <Link href="/clinic" data-testid="link-clinic-quick">
-              <MapPin size={16} />
-              Clinic information
-              <ArrowRight size={14} />
+            <Link href="/appointments/new">
+              <CalendarDays size={16} /> Book appointment <ArrowRight size={14} />
             </Link>
-            <Link href="/appointments/new" data-testid="link-book-quick">
-              <CalendarDays size={16} />
-              Book appointment
-              <ArrowRight size={14} />
+            <Link href="/chat">
+              <MessageCircle size={16} /> Care assistant <ArrowRight size={14} />
             </Link>
-            <Link href="/profile" data-testid="link-profile-quick">
-              <UserRound size={16} />
-              Profile & preferences
-              <ArrowRight size={14} />
+            <Link href="/clinic">
+              <MapPin size={16} /> Clinic info <ArrowRight size={14} />
+            </Link>
+            <Link href="/profile">
+              <UserRound size={16} /> Profile <ArrowRight size={14} />
             </Link>
           </div>
         </aside>

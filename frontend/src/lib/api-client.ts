@@ -56,12 +56,14 @@ class ApiClient {
   private setupInterceptors(): void {
     // Request interceptor
     this.client.interceptors.request.use(
-      (config) => {
-        console.log('[apiClient →]', config.method?.toUpperCase(), config.url, config.data, config.headers?.Authorization ? '(with auth)' : '(no auth)');
+      async (config) => {
+        // Wait for any pending token writes to flush
+        await new Promise((r) => setTimeout(r, 0));
         const token = getAccessToken();
         if (token) {
           config.headers.Authorization = `Bearer ${token}`;
         }
+        console.log('[apiClient →]', config.method?.toUpperCase(), config.url, config.data, token ? '(with auth)' : '(no auth)');
         return config;
       },
       (error) => Promise.reject(error),

@@ -226,7 +226,9 @@ class SafetyAgent(BaseAgent):
         # Extended medical symptoms and conditions
         medical_symptoms = [
             'headache', 'pain', 'rash', 'fever', 'symptom', 'sick',
-            'cough', 'cold', 'flu', 'nausea', 'dizzy', 'fatigue',
+            'cough', 'cold', 'flu', 'nausea', 'nauseous', 'nausetic', 'nauseatic',
+            'dizzy', 'dizziness', 'fatigue', 'tired', 'unwell',
+            'vomit', 'vomiting', 'throwing up', 'uncomfortable',
             'infection', 'allergy', 'swelling', 'bruise', 'cut',
             'burn', 'itch', 'sore throat', 'stomach', 'diarrhea',
             'constipation', 'blood pressure', 'diabetes', 'asthma',
@@ -257,12 +259,28 @@ class SafetyAgent(BaseAgent):
         # Return True if:
         # 1. Has advice pattern AND (symptom or medical term)
         # 2. Has symptom AND asks "what" or "how" (question about health)
+        # 3. User is describing a personal medical state ("I feel X", "I have X",
+        #    "my head hurts", etc.) — this is a medical statement even without a
+        #    direct question.
         if has_advice_pattern and (has_symptom or has_medical_term):
             return True
-        
+
         if has_symptom and any(word in query for word in ['what', 'how', 'should', 'can']):
             return True
-        
+
+        personal_medical_patterns = [
+            r"\bi (?:feel|am|have|got|had|keep|been)\b",
+            r"\bmy (?:head|stomach|chest|throat|back|leg|arm|eye|ear|skin)\b",
+            r"\bi(?:'| a)?m (?:feeling|having)\b",
+            r"\bi(?:'| ha)?ve been\b",
+        ]
+
+        if has_symptom and any(
+            re.search(p, query, re.IGNORECASE)
+            for p in personal_medical_patterns
+        ):
+            return True
+
         return False
     
     def _check_pii_request(self, query: str) -> bool:

@@ -34,18 +34,39 @@ export const useAuthStore = create<AuthState>()(
         }),
       
       setTokens: (accessToken, refreshToken) =>
-        set((state) => ({
-          accessToken,
-          refreshToken: refreshToken ?? state.refreshToken,
-          isAuthenticated: !!accessToken,
-        })),
+        set((state) => {
+          // Mirror tokens into raw localStorage keys so `api-client.ts`
+          // (which reads STORAGE_KEYS.ACCESS_TOKEN) can find them too.
+          if (typeof window !== 'undefined') {
+            try {
+              localStorage.setItem(STORAGE_KEYS.ACCESS_TOKEN, accessToken);
+              if (refreshToken) {
+                localStorage.setItem(STORAGE_KEYS.REFRESH_TOKEN, refreshToken);
+              }
+            } catch {}
+          }
+          return {
+            accessToken,
+            refreshToken: refreshToken ?? state.refreshToken,
+            isAuthenticated: !!accessToken,
+          };
+        }),
       
       clearAuth: () =>
-        set({
-          user: null,
-          accessToken: null,
-          refreshToken: null,
-          isAuthenticated: false,
+        set(() => {
+          // Also clear the raw localStorage keys used by api-client.ts
+          if (typeof window !== 'undefined') {
+            try {
+              localStorage.removeItem(STORAGE_KEYS.ACCESS_TOKEN);
+              localStorage.removeItem(STORAGE_KEYS.REFRESH_TOKEN);
+            } catch {}
+          }
+          return {
+            user: null,
+            accessToken: null,
+            refreshToken: null,
+            isAuthenticated: false,
+          };
         }),
       
       updateUser: (updates) =>

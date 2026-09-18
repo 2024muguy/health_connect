@@ -2356,3 +2356,12 @@ select:focus, input:focus, textarea:focus {
   .form-save-row { align-items: stretch; flex-direction: column; }
   .form-save-row .button { width: 100%; }
 }
+/* Smooth anchor scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Offset for fixed header when jumping to anchors */
+[id] {
+  scroll-margin-top: 80px;
+}

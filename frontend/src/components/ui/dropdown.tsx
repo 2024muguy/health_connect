@@ -35,10 +35,22 @@ export function Dropdown({ trigger, items, align = 'right', className }: Dropdow
 
   return (
     <div ref={ref} className={cn('relative', className)}>
-      <button onClick={() => setOpen(!open)} className="flex items-center gap-1">
+      <div
+        role="button"
+        tabIndex={0}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setOpen(!open);
+          }
+        }}
+        className="flex items-center gap-1 cursor-pointer"
+      >
         {trigger}
-        <ChevronDown size={14} className={cn('transition-transform', open && 'rotate-180')} />
-      </button>
+      </div>
       {open && (
         <div
           className={cn(

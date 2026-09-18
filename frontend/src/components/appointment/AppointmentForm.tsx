@@ -7,7 +7,7 @@
 
 import { useState, type FormEvent } from 'react';
 import { Check, Stethoscope, Heart, ShieldCheck } from 'lucide-react';
-import type { AppointmentCreate, AppointmentAvailability } from '@/types';
+import type { AppointmentFormData, AppointmentAvailability } from '@/types';
 import { formatDate, cn } from '@/lib/utils';
 import { LoadingButton } from '@/components/ui/button';
 import { SkeletonBlock } from '@/components/ui/spinner';
@@ -16,7 +16,7 @@ interface AppointmentFormProps {
   services: Array<{ id: string; name: string; description: string; duration: number }>;
   availability: AppointmentAvailability[];
   isLoadingAvailability?: boolean;
-  onSubmit: (data: AppointmentCreate) => Promise<void>;
+  onSubmit: (data: AppointmentFormData) => Promise<void>;
   isSubmitting?: boolean;
   className?: string;
 }
@@ -37,13 +37,25 @@ export function AppointmentForm({
   const [time, setTime] = useState('');
   const [notes, setNotes] = useState('');
 
-  const chosenService = services.find((s) => s.name === service);
-  const availableSlots = availability.filter((slot) => slot.available);
+  const servicesList: any[] = Array.isArray(services) ? services : (services as any)?.services ?? [];
+  const chosenService = servicesList.find((s: any) => s.name === service);
+  const availableSlots = (Array.isArray(availability) ? availability : (availability as any)?.availability ?? (availability as any)?.slots ?? []).filter((slot: any) => slot.available);
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
-    if (!service || !time) return;
 
+    if (!service) {
+      console.warn('[AppointmentForm] submit blocked: no service selected');
+      alert('Please select a service.');
+      return;
+    }
+    if (!time) {
+      console.warn('[AppointmentForm] submit blocked: no time selected');
+      alert('Please pick a time slot.');
+      return;
+    }
+
+    console.log('[AppointmentForm] submitting', { service, date, time, notes });
     onSubmit({
       service,
       date,
@@ -72,7 +84,7 @@ export function AppointmentForm({
               }}
             >
               <option value="">Select a service</option>
-              {services.map((item) => (
+              {servicesList.map((item) => (
                 <option key={item.id} value={item.name}>
                   {item.name} · {item.duration} min
                 </option>
@@ -115,7 +127,7 @@ export function AppointmentForm({
                   <SkeletonBlock className="h-11" />
                 </>
               ) : availableSlots.length ? (
-                availableSlots.map((slot) => (
+                availableSlots.map((slot: any) => (
                   <button
                     type="button"
                     data-testid={`button-time-${slot.time.replaceAll(' ', '-')}`}

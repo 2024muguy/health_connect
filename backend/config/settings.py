@@ -258,25 +258,10 @@ class HuggingFaceSettings(BaseSettings):
         return bool(self.API_KEY)
 
 
-class OllamaSettings(BaseSettings):
-    """Ollama configuration settings"""
-    
-    model_config = SettingsConfigDict(env_prefix="OLLAMA_", extra="ignore")
-    
-    BASE_URL: str = Field(default="http://localhost:11434", description="Ollama base URL")
-    MODEL: str = Field(default="llama3.1", description="Ollama model name")
-    EMBEDDING_MODEL: str = Field(default="nomic-embed-text", description="Ollama embedding model")
-    
-    @property
-    def is_configured(self) -> bool:
-        """Check if Ollama is configured"""
-        return bool(self.BASE_URL)
-
 
 
 class GroqSettings(BaseSettings):
-    """Groq configuration settings"""
-    
+    """Groq configuration settings."""
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -284,55 +269,104 @@ class GroqSettings(BaseSettings):
         extra="ignore",
         case_sensitive=False,
     )
-    
     API_KEY: str = Field(default="", description="Groq API key")
-    MODEL: str = Field(default="llama-3.1-8b-instant", description="Groq model name")
-    MAX_TOKENS: int = Field(default=512, description="Maximum tokens for response")
-    TEMPERATURE: float = Field(default=0.3, description="Temperature for generation")
-    
+    MODEL: str = Field(default="openai/gpt-oss-20b", description="Main chat model")
+    EMBEDDING_MODEL: str = Field(default="llama-3.1-8b-instant", description="Embedding fallback")
+    MAX_TOKENS: int = Field(default=1024)
+    TEMPERATURE: float = Field(default=0.3)
+
+    # Week 7 per-task models
+    SUMMARY_MODEL: str = Field(default="openai/gpt-oss-20b")
+    JUDGE_MODEL: str = Field(default="openai/gpt-oss-20b")
+    BOOKING_MODEL: str = Field(default="openai/gpt-oss-20b")
+    STREAMING_MODEL: str = Field(default="openai/gpt-oss-20b")
+
     @property
     def is_configured(self) -> bool:
-        """Check if Groq is configured"""
-        return bool(self.API_KEY)
-
-
-
-class GroqSettings(BaseSettings):
-    """Groq configuration settings"""
-    
-    model_config = SettingsConfigDict(env_prefix="GROQ_", extra="ignore")
-    
-    API_KEY: str = Field(default="", description="Groq API key")
-    MODEL: str = Field(
-        default="llama-3.1-70b-versatile",
-        description="Groq model name"
-    )
-    EMBEDDING_MODEL: str = Field(
-        default="llama-3.1-8b-instant",
-        description="Groq embedding model"
-    )
-    MAX_TOKENS: int = Field(default=1024, description="Maximum tokens for response")
-    TEMPERATURE: float = Field(default=0.3, description="Temperature for generation")
-    
-    @property
-    def is_configured(self) -> bool:
-        """Check if Groq is configured"""
         return bool(self.API_KEY)
 
 
 class OllamaSettings(BaseSettings):
-    """Ollama configuration settings"""
-    
-    model_config = SettingsConfigDict(env_prefix="OLLAMA_", extra="ignore")
-    
-    BASE_URL: str = Field(default="http://localhost:11434", description="Ollama base URL")
-    MODEL: str = Field(default="llama3.1", description="Ollama model name")
-    EMBEDDING_MODEL: str = Field(default="nomic-embed-text", description="Ollama embedding model")
-    
+    """Ollama configuration settings."""
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        env_prefix="OLLAMA_",
+        extra="ignore",
+        case_sensitive=False,
+    )
+    BASE_URL: str = Field(default="http://localhost:11434")
+    MODEL: str = Field(default="llama3.1")
+    EMBEDDING_MODEL: str = Field(default="nomic-embed-text")
+
     @property
     def is_configured(self) -> bool:
-        """Check if Ollama is configured"""
         return bool(self.BASE_URL)
+
+
+# ============================================================
+# Week 7 Feature Settings
+# ============================================================
+
+
+class MemorySettings(BaseSettings):
+    """Conversation memory + summarization."""
+    model_config = SettingsConfigDict(env_prefix="MEMORY_", extra="ignore")
+
+    ENABLED: bool = Field(default=True)
+    SUMMARIZE_AFTER_TURNS: int = Field(default=12, description="Trigger summarization after N turns")
+    KEEP_RECENT_TURNS: int = Field(default=6, description="Keep last N turns verbatim in the prompt")
+    EXTRACT_FACTS_EVERY: int = Field(default=6, description="Extract structured facts every N turns")
+    MAX_PROMPT_TURNS: int = Field(default=10, description="Cap on turns fed to the LLM prompt")
+    SUMMARY_MAX_TOKENS: int = Field(default=300)
+
+
+class StreamingSettings(BaseSettings):
+    """Token streaming for SSE and WebSocket chat."""
+    model_config = SettingsConfigDict(env_prefix="STREAMING_", extra="ignore")
+
+    ENABLED: bool = Field(default=True)
+    CHUNK_SIZE: int = Field(default=8, description="Approx tokens per emitted chunk")
+    FLUSH_INTERVAL_MS: int = Field(default=50, description="Min gap between chunks")
+    HEARTBEAT_SEC: int = Field(default=15, description="SSE heartbeat interval")
+
+
+class UncertaintySettings(BaseSettings):
+    """Confidence gating to reduce overconfident / ungrounded answers."""
+    model_config = SettingsConfigDict(env_prefix="UNCERTAINTY_", extra="ignore")
+
+    ENABLED: bool = Field(default=True)
+    MIN_RETRIEVAL_SCORE: float = Field(default=0.45)
+    MIN_JUDGE_SCORE: float = Field(default=0.6)
+    LOW_CONFIDENCE_TEMPLATE: str = Field(
+        default=(
+            "I'm not fully confident in that answer. Let me connect you with a "
+            "HealthConnect staff member who can help. You can also call the clinic "
+            "directly during opening hours."
+        )
+    )
+
+
+class BookingSettings(BaseSettings):
+    """Hybrid conversational booking (collect slots -> confirm -> call API)."""
+    model_config = SettingsConfigDict(env_prefix="BOOKING_", extra="ignore")
+
+    ENABLED: bool = Field(default=True)
+    AUTO_CONFIRM: bool = Field(default=False, description="If True, skip the confirm step")
+    SLOT_TTL_MINUTES: int = Field(default=30, description="Abandoned slot sessions expire")
+    MAX_SLOT_ATTEMPTS: int = Field(default=3, description="Re-asks before aborting")
+
+
+class VoiceSettings(BaseSettings):
+    """Voice transcription + synthesis."""
+    model_config = SettingsConfigDict(env_prefix="VOICE_", extra="ignore")
+
+    ENABLED: bool = Field(default=False, description="Off by default — enable to expose voice endpoints")
+    WHISPER_MODEL: str = Field(default="whisper-1")
+    TTS_MODEL: str = Field(default="tts-1")
+    TTS_VOICE: str = Field(default="alloy")
+    MAX_AUDIO_BYTES: int = Field(default=10 * 1024 * 1024)
+
 
 
 class Settings(BaseSettings):
@@ -376,6 +410,11 @@ class Settings(BaseSettings):
     # Sub-settings
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     llm: LLMSettings = Field(default_factory=LLMSettings)
+    memory: MemorySettings = Field(default_factory=MemorySettings)
+    streaming: StreamingSettings = Field(default_factory=StreamingSettings)
+    uncertainty: UncertaintySettings = Field(default_factory=UncertaintySettings)
+    booking: BookingSettings = Field(default_factory=BookingSettings)
+    voice: VoiceSettings = Field(default_factory=VoiceSettings)
     vector_db: VectorDBSettings = Field(default_factory=VectorDBSettings)
     redis: RedisSettings = Field(default_factory=RedisSettings)
     rag: RAGSettings = Field(default_factory=RAGSettings)

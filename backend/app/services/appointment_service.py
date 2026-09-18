@@ -31,7 +31,8 @@ class AppointmentService:
     Manages appointment operations.
     """
     
-    def __init__(self):
+    def __init__(self, db=None):
+        self.db = db
         logger.info("AppointmentService initialized")
     
     async def create_appointment(
@@ -58,21 +59,92 @@ class AppointmentService:
             Dict: Created appointment
         """
         appointment_code = f"APT-{uuid.uuid4().hex[:8].upper()}"
-        
-        appointment = {
-            "appointment_code": appointment_code,
-            "patient_id": patient_id,
-            "appointment_type": appointment_type,
-            "status": AppointmentStatus.SCHEDULED.value,
-            "scheduled_datetime": scheduled_datetime,
-            "duration_minutes": duration_minutes,
-            "reason": reason,
-            "clinic_location": clinic_location,
-            "created_at": datetime.now(timezone.utc),
+        now = datetime.now(timezone.utc)
+
+        # Persist via the ORM model so we get id + updated_at back.
+        try:
+            from app.models.appointment import (
+                Appointment,
+                AppointmentType as AppointmentTypeEnum,
+                AppointmentStatus as AppointmentStatusEnum,
+            )
+        except ImportError as e:
+            logger.error(f"Cannot import Appointment model: {e}")
+            raise
+
+        # Coerce string to the matching enum member
+        try:
+            at_enum = (
+                AppointmentTypeEnum(appointment_type.lower())
+                if isinstance(appointment_type, str)
+                else appointment_type
+            )
+        except ValueError:
+            logger.warning(
+                f"Unknown appointment_type {appointment_type!r}, defaulting to GENERAL"
+            )
+            at_enum = AppointmentTypeEnum.GENERAL
+
+        row = Appointment(
+            id=uuid.uuid4(),                 # UUID object, not str
+            appointment_code=appointment_code,
+            patient_id=patient_id,           # pass through as-is; SQLAlchemy will coerce
+            appointment_type=at_enum,
+            status=AppointmentStatusEnum.SCHEDULED,
+            scheduled_datetime=scheduled_datetime,
+            duration_minutes=duration_minutes,
+            reason=reason,
+            clinic_location=clinic_location,
+            created_at=now,
+            updated_at=now,
+        )
+
+        session = getattr(self, "session", None) or getattr(self, "db", None)
+        if session is None:
+            # fall back to opening a fresh session
+            from app.database.session import SessionLocal  # type: ignore
+            session = SessionLocal()
+            close_after = True
+        else:
+            close_after = False
+
+        try:
+            session.add(row)
+            session.commit()
+            session.refresh(row)
+            logger.info(f"Created appointment: {appointment_code} (id={row.id})")
+        except Exception:
+            session.rollback()
+            logger.exception("Failed to persist appointment")
+            raise
+        finally:
+            if close_after:
+                session.close()
+
+        return {
+            "id": row.id,                                    # UUID object
+            "appointment_code": row.appointment_code,
+            "patient_id": row.patient_id,                    # UUID object
+            "doctor_id": row.doctor_id,
+            "appointment_type": (
+                row.appointment_type.value
+                if hasattr(row.appointment_type, "value")
+                else row.appointment_type
+            ),
+            "status": (
+                row.status.value
+                if hasattr(row.status, "value")
+                else row.status
+            ),
+            "scheduled_datetime": row.scheduled_datetime,
+            "duration_minutes": row.duration_minutes,
+            "reason": row.reason,
+            "clinic_location": row.clinic_location,
+            "reminder_sent": bool(getattr(row, "reminder_sent", False)),
+            "no_show": bool(getattr(row, "no_show", False)),
+            "created_at": row.created_at,
+            "updated_at": row.updated_at,
         }
-        
-        logger.info(f"Created appointment: {appointment_code}")
-        return appointment
     
     async def reschedule_appointment(
         self,
@@ -214,13 +286,66 @@ class AppointmentService:
         Get appointment details.
         
         Args:
-            appointment_id: Appointment ID
+            appointment_id: Appointment ID (UUID string or UUID object)
             
         Returns:
-            Optional[Dict]: Appointment details
+            Optional[Dict]: Appointment details or None if not found
         """
-        # Placeholder
-        return None
+        from app.models.appointment import Appointment
+        import uuid as _uuid
+
+        # Cast to uuid.UUID because SQLite stores UUID columns as hex
+        # and SQLAlchemy needs a UUID object to query correctly.
+        try:
+            uid = (
+                _uuid.UUID(appointment_id)
+                if isinstance(appointment_id, str)
+                else appointment_id
+            )
+        except (ValueError, AttributeError):
+            logger.warning(f"Invalid appointment_id: {appointment_id!r}")
+            return None
+
+        session = getattr(self, "db", None) or getattr(self, "session", None)
+        owns_session = False
+        if session is None:
+            from app.database.session import SessionLocal  # type: ignore
+            session = SessionLocal()
+            owns_session = True
+
+        try:
+            row = (
+                session.query(Appointment)
+                .filter(Appointment.id == uid)
+                .first()
+            )
+        finally:
+            if owns_session:
+                session.close()
+
+        if row is None:
+            return None
+
+        # Serialize enums to their values for the API layer
+        def _enum_val(v):
+            return v.value if hasattr(v, "value") else v
+
+        return {
+            "id": row.id,                                    # UUID object — Pydantic wants UUID
+            "appointment_code": row.appointment_code,
+            "patient_id": row.patient_id,                    # UUID object
+            "doctor_id": row.doctor_id,                      # UUID object or None
+            "appointment_type": _enum_val(row.appointment_type),
+            "status": _enum_val(row.status),
+            "scheduled_datetime": row.scheduled_datetime,
+            "duration_minutes": row.duration_minutes,
+            "reason": row.reason,
+            "clinic_location": row.clinic_location,
+            "reminder_sent": bool(getattr(row, "reminder_sent", False)),
+            "no_show": bool(getattr(row, "no_show", False)),
+            "created_at": row.created_at,
+            "updated_at": row.updated_at,
+        }
     
     async def list_appointments(
         self,

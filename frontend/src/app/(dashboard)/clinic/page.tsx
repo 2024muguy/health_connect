@@ -1,11 +1,12 @@
 /**
  * HealthConnect AI - Clinic Page
- * Clinic information and services
+ * Full clinic information, services, map, and offers
  */
 
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   MapPin,
   Phone,
@@ -13,27 +14,102 @@ import {
   CalendarClock,
   Clock3,
 } from 'lucide-react';
-import { clinicApi } from '@/lib/api';
+import { apiClient } from '@/lib/api-client';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/shared/EmptyState';
-import type { ClinicInfo, ClinicService } from '@/types';
+import { ClinicMap } from '@/components/dashboard/ClinicMap';
+import { PromoOffers } from '@/components/dashboard/PromoOffers';
+
+const SERVICE_DURATIONS: Record<string, number> = {
+  'General outpatient consultations': 30,
+  'Follow-up consultations': 20,
+  'Selected specialist consultations': 45,
+  'Diagnostic and routine laboratory services': 15,
+  'Preventive health and wellness consultations': 30,
+};
+
+const SERVICE_DESCRIPTIONS: Record<string, string> = {
+  'General outpatient consultations': 'Initial consultation with a general practitioner.',
+  'Follow-up consultations': 'Follow-up visit for ongoing care.',
+  'Selected specialist consultations': 'Specialist visit (by appointment only).',
+  'Diagnostic and routine laboratory services': 'Lab tests and diagnostics.',
+  'Preventive health and wellness consultations': 'Wellness check and preventive care.',
+};
+
+function normalizeService(raw: any, index: number) {
+  if (typeof raw === 'string') {
+    return {
+      id: `svc-${index}`,
+      name: raw,
+      description: SERVICE_DESCRIPTIONS[raw] || '',
+      duration: SERVICE_DURATIONS[raw] || 30,
+    };
+  }
+  return {
+    id: raw?.id ?? `svc-${index}`,
+    name: raw?.name ?? String(raw),
+    description: raw?.description ?? '',
+    duration: raw?.duration ?? 30,
+  };
+}
 
 export default function ClinicPage() {
-  const [info, setInfo] = useState<ClinicInfo | null>(null);
-  const [services, setServices] = useState<ClinicService[]>([]);
+  const [info, setInfo] = useState<any>(null);
+  const [services, setServices] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Auto-scroll to hash anchor (#directions, #offers)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const scrollToHash = () => {
+      const hash = window.location.hash;
+      if (!hash) return;
+      const id = hash.slice(1);
+      const el = document.getElementById(id);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    };
+
+    // Scroll on initial load (give DOM a moment to render)
+    const timer = setTimeout(scrollToHash, 300);
+
+    // Also scroll when the hash changes (e.g., clicking again)
+    window.addEventListener('hashchange', scrollToHash);
+
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('hashchange', scrollToHash);
+    };
+  }, []);
 
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [infoData, servicesData] = await Promise.all([
-          clinicApi.getInfo(),
-          clinicApi.getServices(),
+        const [infoRes, servicesRes] = await Promise.all([
+          apiClient.get<any>('/clinic/info').catch(() => null),
+          apiClient.get<any>('/clinic/services').catch(() => null),
         ]);
-        setInfo(infoData);
-        setServices(servicesData as unknown as ClinicService[]);
-      } catch {
-        // Handle error
+
+        if (infoRes) {
+          setInfo({
+            name: infoRes.name || 'HealthConnect Clinic',
+            tagline: infoRes.description || 'Comprehensive healthcare services for the community',
+            address: '14 Wellness Avenue, Central District',
+            phone: '+254 700 000 000',
+            email: 'care@healthconnect.com',
+            hours: 'Mon–Fri 8AM–6PM · Sat 9AM–2PM',
+            founded: infoRes.founded,
+          });
+        }
+
+        if (servicesRes) {
+          const raw = Array.isArray(servicesRes) ? servicesRes : servicesRes?.services ?? [];
+          setServices(raw.map((s: any, i: number) => normalizeService(s, i)));
+        }
+      } catch (err) {
+        console.error('[clinic] load failed', err);
       } finally {
         setIsLoading(false);
       }
@@ -64,21 +140,11 @@ export default function ClinicPage() {
       <div className="mb-8">
         <p className="eyebrow">The people behind your care</p>
         <h1 className="page-title">{info.name}</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          {info.tagline || 'Thoughtful care, close to home.'}
-        </p>
+        <p className="mt-2 text-sm text-muted-foreground">{info.tagline}</p>
       </div>
 
-      {/* Clinic Intro */}
+      {/* Contact grid */}
       <div className="clinic-intro">
-        <div className="clinic-map">
-          <div className="map-grid" />
-          <div className="map-pin">
-            <MapPin size={20} fill="currentColor" />
-          </div>
-          <span>We are here for you</span>
-        </div>
-
         <div className="clinic-contact-grid">
           <Contact icon={MapPin} label="Visit us" value={info.address} />
           <Contact icon={Phone} label="Call the clinic" value={info.phone} />
@@ -90,7 +156,9 @@ export default function ClinicPage() {
       {/* Services */}
       <div className="section-heading mt-10 mb-5">
         <h2>Services</h2>
-        <span className="muted-count">{services.length} ways we can help</span>
+        <span className="muted-count">
+          {services.length} ways we can help
+        </span>
       </div>
 
       <div className="services-grid">
@@ -98,7 +166,7 @@ export default function ClinicPage() {
           <div
             key={service.id}
             data-testid={`card-service-${service.id}`}
-            className={`service-card service-accent-${index % 2 + 1}`}
+            className={`service-card service-accent-${(index % 2) + 1}`}
           >
             <div className="service-number">
               {String(index + 1).padStart(2, '0')}
@@ -114,6 +182,26 @@ export default function ClinicPage() {
           </div>
         ))}
       </div>
+
+      {/* ============================================================
+          DIRECTIONS — full interactive map
+          ============================================================ */}
+      <div id="directions" className="section-heading mt-12 mb-5">
+        <h2>Directions</h2>
+        <span className="muted-count">Navigate to Ongata Rongai</span>
+      </div>
+
+      <ClinicMap />
+
+      {/* ============================================================
+          OFFERS — full promo list
+          ============================================================ */}
+      <div id="offers" className="section-heading mt-12 mb-5">
+        <h2>Special Offers</h2>
+        <span className="muted-count">Health programs & promotions</span>
+      </div>
+
+      <PromoOffers />
     </>
   );
 }

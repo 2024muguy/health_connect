@@ -13,6 +13,7 @@ import type { ChatMessage, ChatResponse, Conversation } from '@/types';
 import { CHAT_CONSTANTS } from '@/lib/constants';
 
 interface UseChatReturn {
+  isLoading: boolean;
   messages: ChatMessage[];
   conversations: Conversation[];
   activeConversationId: string | null;
@@ -20,7 +21,7 @@ interface UseChatReturn {
   isStreaming: boolean;
   connectionStatus: WebSocketStatus;
   error: string | null;
-  sendMessage: (content: string, conversationId?: string) => Promise<void>;
+  sendMessage: (content: string, conversationId?: string) => Promise<ChatResponse | undefined>;
   loadConversations: () => Promise<void>;
   loadConversation: (id: string) => Promise<void>;
   deleteConversation: (id: string) => Promise<void>;
@@ -46,6 +47,7 @@ export function useChat(initialConversationId?: string): UseChatReturn {
   } = useChatStore();
 
   const [isSending, setIsSending] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<WebSocketStatus>('disconnected');
   const [error, setError] = useState<string | null>(null);
   const wsRef = useRef<WebSocketClient | null>(null);
@@ -57,14 +59,18 @@ export function useChat(initialConversationId?: string): UseChatReturn {
     const conversationId = initialConversationId || activeConversationId;
     if (!conversationId) return;
 
-    const ws = new WebSocketClient(conversationId, {
+    const ws = WebSocketClient.getInstance(conversationId, {
       onMessage: handleWebSocketMessage,
       onStatusChange: setConnectionStatus,
       onError: (err) => setError(err.message),
-      autoReconnect: true,
-      maxReconnectAttempts: 5,
-      reconnectDelayMs: 1000,
     });
+
+    // Attach the current access token BEFORE connecting so the
+    // handshake URL carries ?token=...
+    if (typeof window !== 'undefined') {
+      const token = window.localStorage.getItem('hc_access_token');
+      if (token) ws.setToken(token);
+    }
 
     ws.connect();
     wsRef.current = ws;
@@ -151,13 +157,13 @@ export function useChat(initialConversationId?: string): UseChatReturn {
       try {
         const response: ChatResponse = await chatApi.sendMessage({
           message: content.trim(),
-          conversation_id: targetConversationId,
+          conversation_id: targetConversationId ?? undefined,
         });
 
         const assistantMessage: ChatMessage = {
           id: response.message_id,
           role: 'assistant',
-          content: response.message,
+          content: response.response || response.text || response.message || '',
           intent: response.intent,
           confidence: response.intent_confidence,
           timestamp: response.timestamp,
@@ -204,6 +210,7 @@ export function useChat(initialConversationId?: string): UseChatReturn {
   const clearError = useCallback(() => setError(null), []);
 
   return {
+    isLoading,
     messages: activeConversationId ? messages[activeConversationId] || [] : [],
     conversations,
     activeConversationId,

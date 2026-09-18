@@ -25,6 +25,80 @@ from config.settings import get_settings
 from config.logging_config import get_logger
 
 logger = get_logger(__name__)
+from app.services.input_guard import guard_message  # noqa: E402
+from app.services.audit_log import audit  # noqa: E402
+from app.services.memory_service import memory_service  # noqa: E402
+
+
+# ============================================
+# Response scrubber — belt-and-braces guard
+# ============================================
+# Even if a downstream generator leaks raw KB content, this scrubs it at
+# the API boundary before the response is returned to the client.
+
+_STRUCTURED_MARKERS = (
+    "Variable:", "Data Type:", "Description:", "Example:", "Notes:",
+)
+
+_KB_ARTIFACT_MARKERS = (
+    "Q: Can the assistant tell me",
+    "A: This information assistant",
+    "What to Bring to an Appointment",
+    "7. What to Bring",
+)
+
+_SAFE_FALLBACK = (
+    "I don't have a confident answer for that in HealthConnect's knowledge base. "
+    "I can connect you with a HealthConnect staff member, or help you book "
+    "a consultation. Which would you prefer?"
+)
+
+_SAFE_FOLLOWUP = (
+    "Of course. To help with that, could you tell me a bit more about what "
+    "you'd like to do next — book an appointment, reschedule an existing one, "
+    "or ask about clinic services?"
+)
+
+_SHORT_FOLLOWUPS = {
+    "yes", "yep", "yeah", "yup", "sure", "ok", "okay", "k",
+    "no", "nope", "nah", "n",
+    "please", "please do", "go ahead", "yes please",
+    "sounds good", "alright", "fine",
+}
+
+
+def _is_short_followup(query: str) -> bool:
+    if not query:
+        return False
+    q = query.strip().lower().rstrip(".!?,")
+    return q in _SHORT_FOLLOWUPS
+
+
+def _looks_like_leak(text: str) -> bool:
+    """Detect raw KB chunk content that should not be shown to a patient."""
+    if not text:
+        return False
+    # Structured data (data-dictionary rows)
+    structured_hits = sum(1 for m in _STRUCTURED_MARKERS if m in text)
+    if structured_hits >= 2:
+        return True
+    # Verbatim KB artefacts
+    for marker in _KB_ARTIFACT_MARKERS:
+        if marker in text:
+            return True
+    return False
+
+
+def _scrub_response(text: str, query: str = "") -> str:
+    """Return a safe, patient-friendly response. Replaces leaked KB content."""
+    if not text or not text.strip():
+        return _SAFE_FALLBACK
+    if _looks_like_leak(text):
+        logger.warning(f"Response scrubber triggered. Query={query!r}")
+        if _is_short_followup(query):
+            return _SAFE_FOLLOWUP
+        return _SAFE_FALLBACK
+    return text
 settings = get_settings()
 
 
@@ -44,7 +118,108 @@ class ChatService:
         self._conversation_history: Dict[str, List[Dict[str, Any]]] = {}
         self.session_timeout = settings.safety.SESSION_TIMEOUT_MINUTES * 60
         logger.info("ChatService initialized")
-    
+
+    # ============================================
+    # Database Persistence Helpers
+    # ============================================
+
+    async def _ensure_conversation_db(self, conversation_code: str, session_token=None, user_id=None) -> str:
+        """Ensure a Conversation row exists in the DB and return its UUID."""
+        import uuid
+        from app.database.session import AsyncSessionLocal
+        from app.models.conversation import Conversation, ConversationStatus
+        from sqlalchemy import select
+
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(Conversation).where(Conversation.conversation_code == conversation_code)
+            )
+            existing = result.scalar_one_or_none()
+            if existing:
+                return str(existing.id)
+
+            conv = Conversation(
+                conversation_code=conversation_code,
+                session_token=session_token or str(uuid.uuid4()),
+                status=ConversationStatus.ACTIVE,
+                patient_id=None,
+            )
+            session.add(conv)
+            await session.commit()
+            await session.refresh(conv)
+            return str(conv.id)
+
+    async def _persist_message_db(
+        self,
+        conversation_code: str,
+        role: str,
+        content: str,
+        intent=None,
+        safety_category=None,
+        session_token: Optional[str] = None,
+    ) -> None:
+        """Persist a single message to the DB."""
+        from app.database.session import AsyncSessionLocal
+        from app.models.message import Message, MessageSender, MessageType
+
+        try:
+            conv_uuid = await self._ensure_conversation_db(
+                conversation_code, session_token=session_token
+            )
+            async with AsyncSessionLocal() as session:
+                sender = MessageSender.USER if role == "user" else MessageSender.ASSISTANT
+                msg = Message(
+                    conversation_id=conv_uuid,
+                    sender_type=sender,
+                    message_type=MessageType.TEXT,
+                    content=content,
+                    intent=intent,
+                    safety_category=safety_category,
+                )
+                session.add(msg)
+                await session.commit()
+        except Exception as e:
+            logger.warning(f"Failed to persist message: {e}")
+
+    async def _load_history_db(self, conversation_code: str, limit: int = 50):
+        """Load conversation history from DB."""
+        try:
+            from app.database.session import AsyncSessionLocal
+            from app.models.conversation import Conversation
+            from app.models.message import Message, MessageSender
+            from sqlalchemy import select
+
+            async with AsyncSessionLocal() as session:
+                r = await session.execute(
+                    select(Conversation).where(Conversation.conversation_code == conversation_code)
+                )
+                conv = r.scalar_one_or_none()
+                if not conv:
+                    return []
+
+                msgs = await session.execute(
+                    select(Message)
+                    .where(Message.conversation_id == str(conv.id))
+                    .order_by(Message.created_at.asc())
+                    .limit(limit)
+                )
+                out = []
+                for m in msgs.scalars().all():
+                    role = "user" if m.sender_type == MessageSender.USER else "assistant"
+                    out.append({
+                        "id": str(m.id),
+                        "role": role,
+                        "content": m.content,
+                        "timestamp": m.created_at.isoformat() if m.created_at else None,
+                        "intent": m.intent,
+                        "safety_category": m.safety_category,
+                    })
+                return out
+        except Exception as e:
+            logger.warning(f"Failed to load history: {e}")
+            return []
+
+
     async def process_message(
         self,
         message: str,
@@ -64,25 +239,106 @@ class ChatService:
         Returns:
             Dict: Response with metadata
         """
-        # Get or create conversation
+        # ---- Input guard (injection / size / sanitize) ----
+        guard = guard_message(message)
+        if not guard.allowed:
+            logger.warning(f"Input guard rejected message (reason={guard.reason})")
+            audit("input_blocked", reason=guard.reason, session=session_token, preview=message[:120])
+            return {
+                "conversation_id": conversation_id or "",
+                "text": (
+                    "I can't help with that request. I'm here for clinic "
+                    "information, appointments, and services. How can I help?"
+                ),
+                "message": (
+                    "I can't help with that request. I'm here for clinic "
+                    "information, appointments, and services. How can I help?"
+                ),
+                "intent": "blocked",
+                "requires_human": False,
+                "safety_category": "injection_blocked",
+            }
+        message = guard.sanitized or message
+
+        # Get or create conversation.
+        # Priority: explicit conversation_id -> existing session_token -> new
         if conversation_id:
             conversation = await self._get_conversation(conversation_id)
+            if conversation is None:
+                conversation = await self._create_conversation(session_token, user_id)
         else:
-            conversation = await self._create_conversation(session_token, user_id)
+            conversation = None
+            # Reuse the conversation tied to this session_token, if any
+            if session_token:
+                from app.database.session import AsyncSessionLocal
+                from app.models.conversation import Conversation as ConvModel
+                from sqlalchemy import select as _select
+                try:
+                    async with AsyncSessionLocal() as _s:
+                        _r = await _s.execute(
+                            _select(ConvModel)
+                            .where(ConvModel.session_token == session_token)
+                            .order_by(ConvModel.started_at.desc())
+                            .limit(1)
+                        )
+                        conversation = _r.scalar_one_or_none()
+                except Exception as e:
+                    logger.warning(f"session lookup failed: {e}")
+
+            if conversation is None:
+                conversation = await self._create_conversation(session_token, user_id)
         
-        # Get conversation history
-        history = self._conversation_history.get(
-            conversation_id,
-            [],
+        # Get conversation history from DB
+        conv_code = conversation_id or (conversation.conversation_code if conversation else None)
+        history = await self._load_history_db(conv_code) if conv_code else []
+        
+        # ---- Load conversation memory (summary + facts) ----
+        memory = {"summary": None, "facts": None}
+        try:
+            if conversation is not None:
+                memory = memory_service.load_memory(conversation)
+            elif conv_code:
+                # fall back: fetch fresh so we don't lose state
+                from app.database.session import AsyncSessionLocal
+                from app.models.conversation import Conversation as ConvModel
+                from sqlalchemy import select as _select
+                async with AsyncSessionLocal() as _s:
+                    _r = await _s.execute(
+                        _select(ConvModel).where(ConvModel.conversation_code == conv_code)
+                    )
+                    _conv = _r.scalar_one_or_none()
+                    if _conv is not None:
+                        conversation = _conv
+                        memory = memory_service.load_memory(_conv)
+        except Exception as e:
+            logger.warning(f"Failed to load memory: {e}")
+
+        memory_block = memory_service.build_prompt_block(
+            summary=memory.get("summary"),
+            facts=memory.get("facts"),
+            history=history,
         )
-        
-        # Build agent context
+
+        # Debug: confirm what we're sending
+        logger.info(
+            f"[MEMORY] conversation={conv_code} "
+            f"summary_chars={len(memory.get('summary') or '')} "
+            f"facts_keys={list((memory.get('facts') or {}).keys())} "
+            f"block_chars={len(memory_block)}"
+        )
+
+        # Build agent context (with memory)
         context = AgentContext(
             conversation_id=conversation_id or conversation.conversation_code,
             query=message,
             user_id=user_id,
             history=history,
+            metadata={
+                "memory_block": memory_block,
+                "facts": memory.get("facts") or {},
+            },
         )
+        logger.info(f"[MEMORY] context.metadata set? hasattr={hasattr(context, 'metadata')}")
         
         # Process through orchestrator
         result = await self.orchestrator.process_conversation(context)
@@ -112,6 +368,9 @@ class ChatService:
             result.output.get("response") or
             "I apologize, but I couldn't generate a response. Please try again."
         )
+
+        # Belt-and-braces: scrub any leaked KB content before returning
+        response_text = _scrub_response(response_text, query=message)
         
         # Build response with BOTH "text" and "message" keys for compatibility
         response = {
@@ -130,6 +389,27 @@ class ChatService:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         
+        # Persist both messages to DB
+        if conv_code:
+            await self._persist_message_db(
+                conv_code, "user", message, session_token=session_token
+            )
+            await self._persist_message_db(
+                conv_code,
+                "assistant",
+                response_text,
+                intent=response.get("intent"),
+                safety_category=response.get("safety_category"),
+                session_token=session_token,
+            )
+
+        # ---- Update rolling memory (summary + facts) ----
+        try:
+            if conv_code:
+                await memory_service.update_memory(conv_code, history)
+        except Exception as e:
+            logger.warning(f"memory update failed: {e}")
+
         return response
     
     async def _create_conversation(
@@ -137,24 +417,34 @@ class ChatService:
         session_token: Optional[str],
         user_id: Optional[str],
     ) -> Conversation:
-        """Create new conversation"""
+        """Create new conversation and persist it to the DB."""
         conversation_code = f"CONV-{uuid.uuid4().hex[:8].upper()}"
         session_token = session_token or str(uuid.uuid4())
-        
+
         conversation = Conversation(
             conversation_code=conversation_code,
             session_token=session_token,
             status=ConversationStatus.ACTIVE,
             patient_id=None,  # Would be set if user is authenticated
         )
-        
+
+        # Persist to DB so subsequent turns can find it via session_token
+        try:
+            from app.database.session import AsyncSessionLocal
+            async with AsyncSessionLocal() as s:
+                s.add(conversation)
+                await s.commit()
+                await s.refresh(conversation)
+            logger.info(f"Created conversation: {conversation_code} (session={session_token})")
+        except Exception as e:
+            logger.warning(f"Failed to persist new conversation: {e}")
+
         self._active_sessions[conversation_code] = {
             "created_at": datetime.now(timezone.utc),
             "last_activity": datetime.now(timezone.utc),
             "message_count": 0,
         }
-        
-        logger.info(f"Created conversation: {conversation_code}")
+
         return conversation
     
     async def _get_conversation(self, conversation_id: str) -> Optional[Conversation]:
@@ -201,19 +491,10 @@ class ChatService:
         conversation_id: str,
         limit: int = 50,
     ) -> List[Dict[str, Any]]:
-        """
-        Get conversation history.
-        
-        Args:
-            conversation_id: Conversation ID
-            limit: Maximum messages
-            
-        Returns:
-            List[Dict]: Conversation history
-        """
-        history = self._conversation_history.get(conversation_id, [])
-        return history[-limit:]
-    
+        """Get conversation history from DB."""
+        return await self._load_history_db(conversation_id, limit)
+
+
     async def cleanup_expired_sessions(self) -> int:
         """
         Clean up expired sessions.

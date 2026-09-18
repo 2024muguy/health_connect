@@ -40,7 +40,19 @@ class Patient(BaseModel, SoftDeleteMixin):
     """
     
     __tablename__ = "patients"
-    
+
+    # ============================================
+    # Auth link (1:1 with users)
+    # ============================================
+    user_id = Column(
+        String(64),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        unique=True,
+        nullable=True,
+        index=True,
+        comment="Link to the authenticated user account (1:1)",
+    )
+
     # ============================================
     # Basic Information
     # ============================================
