@@ -23,6 +23,7 @@ export default function ChatPage() {
     isSending,
     error,
     sendMessage,
+    sendMessageStreaming,
     loadConversations,
     deleteConversation,
   } = useChat();
@@ -43,10 +44,17 @@ export default function ChatPage() {
     if (!newMessage.trim()) return;
 
     try {
+      // The hub creates the conversation via the non-streaming endpoint
+      // (returns conversation_id synchronously), then hands off to the
+      // conversation page which streams the actual reply.
       const response = await sendMessage(newMessage.trim());
-      const convId = (response as any)?.conversation_id ?? (response as any)?.conversationId;
+      const convId =
+        (response as any)?.conversation_id ?? (response as any)?.conversationId;
       if (convId) {
         router.push(`/chat/${convId}`);
+      } else {
+        // no id returned — refresh the list as a fallback
+        await loadConversations();
       }
     } catch {
       // Error handled by hook

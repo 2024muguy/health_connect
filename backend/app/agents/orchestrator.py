@@ -358,19 +358,23 @@ class Orchestrator:
                 "You can also call the clinic directly during opening hours."
             )
 
+        # Guard: any stage can return output=None on empty/failed retrieval.
+        def _out(r):
+            return (r.output if r and r.output is not None else {})
+
         response_data = {
             "text": response_text,
             "intent": final_intent,
             "intent_confidence": intent_result.confidence,
-            "safety_category": safety_result.output.get("safety_category", "safe"),
-            "safety_score": safety_result.output.get("safety_score", 1.0),
-            "retrieved_chunks": retrieval_result.output.get("chunks", []),
-            "sources": retrieval_result.output.get("sources", []),
-            "citations": generation_result.output.get("citations", []),
-            "action_performed": action_result.output if action_result else None,
+            "safety_category": _out(safety_result).get("safety_category", "safe"),
+            "safety_score": _out(safety_result).get("safety_score", 1.0),
+            "retrieved_chunks": _out(retrieval_result).get("chunks", []),
+            "sources": _out(retrieval_result).get("sources", []),
+            "citations": _out(generation_result).get("citations", []),
+            "action_performed": _out(action_result) if action_result else None,
             "requires_human": (
                 True if force_human else (
-                    action_result.output.get("requires_human", False)
+                    _out(action_result).get("requires_human", False)
                     if action_result else False
                 )
             ),

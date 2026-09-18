@@ -31,6 +31,10 @@ from app.services.memory_service import memory_service  # noqa: E402
 from app.services.uncertainty_service import uncertainty_service  # noqa: E402
 from app.services.booking_service import booking_service  # noqa: E402
 
+# Module-level state (persists across ChatService instances)
+_PENDING_ESCALATIONS: dict = {}
+
+
 
 # ============================================
 # Response scrubber — belt-and-braces guard
@@ -165,6 +169,15 @@ class ChatService:
             if existing:
                 return str(existing.id)
 
+            # Also check by session_token to avoid UNIQUE violation
+            if session_token:
+                r2 = await session.execute(
+                    select(Conversation).where(Conversation.session_token == session_token)
+                )
+                existing2 = r2.scalar_one_or_none()
+                if existing2:
+                    return str(existing2.id)
+
             conv = Conversation(
                 conversation_code=conversation_code,
                 session_token=session_token or str(uuid.uuid4()),
@@ -271,21 +284,90 @@ class ChatService:
         if not guard.allowed:
             logger.warning(f"Input guard rejected message (reason={guard.reason})")
             audit("input_blocked", reason=guard.reason, session=session_token, preview=message[:120])
+            _blocked = (
+                "I can't help with that request. I'm here for clinic "
+                "information, appointments, and services. How can I help?"
+            )
             return {
                 "conversation_id": conversation_id or "",
-                "text": (
-                    "I can't help with that request. I'm here for clinic "
-                    "information, appointments, and services. How can I help?"
-                ),
-                "message": (
-                    "I can't help with that request. I'm here for clinic "
-                    "information, appointments, and services. How can I help?"
-                ),
+                "text": _blocked,
+                "message": _blocked,
+                "response": _blocked,
                 "intent": "blocked",
                 "requires_human": False,
                 "safety_category": "injection_blocked",
             }
         message = guard.sanitized or message
+
+        # ---- Escalation intent short-circuit ----
+        # Catch common phrasings that should hand off to a human even when
+        # the LLM/router classifies them as something else.
+        ESCALATION_PHRASES = (
+            "connect me", "connecting me", "connect me with",
+            "put me in touch", "put me through", "put me in contact",
+            "speak to a human", "speak to someone", "speak to a person",
+            "talk to a human", "talk to someone", "talk to a person",
+            "speak to a staff member", "talk to a staff member",
+            "speak to a representative", "talk to a representative",
+            "speak to a manager", "talk to a manager",
+            "speak with", "talk with", "chat with",
+            "real person", "live agent", "human agent", "human please",
+            "transfer me", "escalate", "raise a complaint",
+            "isnt connecting", "arent connecting", "not connecting",
+            "why arent you", "why are you not",
+        )
+        m_lower = message.lower()
+        wants_human = any(phrase in m_lower for phrase in ESCALATION_PHRASES)
+
+        # Follow-up confirmation of a prior escalation offer
+        if not wants_human and session_token:
+            if _PENDING_ESCALATIONS.get(session_token):
+                if m_lower.strip().rstrip(".!?") in ("yes", "yep", "yeah", "sure", "ok", "okay", "please"):
+                    wants_human = True
+
+        if wants_human:
+            logger.info(f"[ESCALATION] detected in message: {message!r}")
+            # Mark a pending escalation for the next turn so a subsequent
+            # "yes" also triggers
+            _PENDING_ESCALATIONS[session_token] = True
+
+            try:
+                from app.services.tool_registry import tool_registry
+                tool_result = await tool_registry.call(
+                    "escalate_to_human",
+                    reason=message,
+                    session_token=session_token,
+                )
+            except Exception as e:
+                logger.warning(f"escalate_to_human tool failed: {e}")
+                tool_result = {"ok": False}
+
+            pass  # keep pending flag so next 'yes' escalates too
+
+            text = (
+                "Understood — I'm connecting you with a HealthConnect staff member now. "
+                "A representative will reach out shortly. You can also call the clinic "
+                "directly during opening hours."
+            )
+
+            # If this turn was a bare confirmation of a prior escalation offer,
+            # consume the pending flag so it doesn't linger forever.
+            _bare_yes = m_lower.strip().rstrip(".!?").lower() in (
+                "yes", "yep", "yeah", "sure", "ok", "okay", "please",
+            )
+            if _bare_yes:
+                _PENDING_ESCALATIONS.pop(session_token, None)
+
+            return {
+                "conversation_id": "",
+                "text": text,
+                "message": text,
+                "response": text,
+                "intent": "escalation_request",
+                "requires_human": True,
+                "escalated": True,
+                "tool_result": tool_result,
+            }
 
         # ---- Hybrid conversational booking interception ----
         if booking_service.enabled and session_token:
@@ -348,10 +430,7 @@ class ChatService:
                             "intent": "appointment_booking",
                             "requires_human": False,
                         }
-                elif any(k in message.lower() for k in (
-                    "book an appointment", "make an appointment",
-                    "schedule an appointment", "i want to book",
-                )):
+                elif booking_service.detect_booking_intent(message):
                     booking_service.start(session_token)
                     slots = booking_service.update_from_message(session_token, message)
                     prompt = booking_service.next_prompt(slots)
@@ -557,18 +636,46 @@ class ChatService:
         session_token: Optional[str],
         user_id: Optional[str],
     ) -> Conversation:
-        """Create new conversation and persist it to the DB."""
-        conversation_code = f"CONV-{uuid.uuid4().hex[:8].upper()}"
+        """Create new conversation and persist it to the DB.
+
+        Idempotent by session_token: if a conversation already exists for
+        this session, return it instead of inserting a duplicate.
+        """
         session_token = session_token or str(uuid.uuid4())
 
+        # Idempotency: check whether this session_token already has a row
+        try:
+            from app.database.session import AsyncSessionLocal
+            from app.models.conversation import Conversation as ConvModel
+            from sqlalchemy import select
+            async with AsyncSessionLocal() as s:
+                r = await s.execute(
+                    select(ConvModel).where(ConvModel.session_token == session_token)
+                )
+                existing = r.scalar_one_or_none()
+                if existing:
+                    logger.info(
+                        f"Reusing existing conversation {existing.conversation_code} "
+                        f"(session={session_token})"
+                    )
+                    self._active_sessions[existing.conversation_code] = {
+                        "created_at": datetime.now(timezone.utc),
+                        "last_activity": datetime.now(timezone.utc),
+                        "message_count": existing.message_count or 0,
+                    }
+                    return existing
+        except Exception as e:
+            logger.warning(f"session_token lookup failed: {e}")
+
+        # Otherwise create a new conversation
+        conversation_code = f"CONV-{uuid.uuid4().hex[:8].upper()}"
         conversation = Conversation(
             conversation_code=conversation_code,
             session_token=session_token,
             status=ConversationStatus.ACTIVE,
-            patient_id=None,  # Would be set if user is authenticated
+            patient_id=None,
         )
 
-        # Persist to DB so subsequent turns can find it via session_token
         try:
             from app.database.session import AsyncSessionLocal
             async with AsyncSessionLocal() as s:

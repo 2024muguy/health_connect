@@ -44,7 +44,7 @@ class ApiClient {
   constructor() {
     this.client = axios.create({
       baseURL: API_BASE_URL,
-      timeout: 30000,
+      timeout: 120000,   // 2 minutes — LLM generation can take 15-30s
       headers: {
         'Content-Type': 'application/json',
       },

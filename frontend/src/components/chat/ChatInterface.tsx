@@ -5,13 +5,14 @@
 
 'use client';
 
-import { useRef, useEffect, useCallback } from 'react';
+import { useRef, useEffect, useCallback, useState } from 'react';
 import { useChat } from '@/hooks/useChat';
 import { MessageBubble } from './MessageBubble';
 import { MessageInput } from './MessageInput';
 import { TypingIndicator } from './TypingIndicator';
 import { ChatHeader } from './ChatHeader';
 import { QuickReplies } from './QuickReplies';
+import { StreamingToggle } from './StreamingToggle';
 import { EmptyState } from '@/components/shared/EmptyState';
 import { MessageCircle } from 'lucide-react';
 import { CHAT_CONSTANTS } from '@/lib/constants';
@@ -37,8 +38,11 @@ export function ChatInterface({
     connectionStatus,
     error,
     sendMessage,
+    sendMessageStreaming,
     setActiveConversation,
   } = useChat(conversationId);
+
+  const [useStreaming, setUseStreaming] = useState(true);  // forced Streaming mode
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -50,9 +54,13 @@ export function ChatInterface({
 
   const handleSend = useCallback(
     async (content: string) => {
-      await sendMessage(content, conversationId);
+      if (useStreaming) {
+        await sendMessageStreaming(content, conversationId);
+      } else {
+        await sendMessage(content, conversationId);
+      }
     },
-    [sendMessage, conversationId],
+    [useStreaming, sendMessage, sendMessageStreaming, conversationId],
   );
 
   const handleQuickReply = useCallback(
@@ -121,6 +129,9 @@ export function ChatInterface({
         onSend={handleSend}
         disabled={isSending}
         textareaRef={textareaRef}
+        headerSlot={
+          <StreamingToggle enabled={useStreaming} onChange={setUseStreaming} />
+        }
       />
 
       <p className="disclaimer px-5 pb-2">

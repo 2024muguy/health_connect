@@ -57,20 +57,36 @@ export const useChatStore = create<ChatState>()(
         })),
       
       addMessage: (conversationId, message) =>
-        set((state) => ({
-          messages: {
-            ...state.messages,
-            [conversationId]: [...(state.messages[conversationId] || []), message],
-          },
-        })),
+        set((state) => {
+          const current = state.messages[conversationId] || [];
+          // Replace-by-id if the message already exists (streaming updates),
+          // otherwise append.
+          const existingIdx = current.findIndex((m) => m.id === message.id);
+          const next =
+            existingIdx >= 0
+              ? current.map((m, i) => (i === existingIdx ? message : m))
+              : [...current, message];
+          return {
+            messages: {
+              ...state.messages,
+              [conversationId]: next,
+            },
+          };
+        }),
       
       addMessages: (conversationId, messages) =>
-        set((state) => ({
-          messages: {
-            ...state.messages,
-            [conversationId]: [...(state.messages[conversationId] || []), ...messages],
-          },
-        })),
+        set((state) => {
+          const current = state.messages[conversationId] || [];
+          // Merge by id — new ones appended, existing ones replaced.
+          const byId = new Map(current.map((m) => [m.id, m]));
+          for (const m of messages) byId.set(m.id, m);
+          return {
+            messages: {
+              ...state.messages,
+              [conversationId]: Array.from(byId.values()),
+            },
+          };
+        }),
       
       clearMessages: (conversationId) =>
         set((state) => ({

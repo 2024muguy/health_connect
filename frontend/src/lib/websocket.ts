@@ -15,7 +15,8 @@ export type WebSocketStatus =
   | 'error';
 
 export interface WebSocketMessage {
-  type: 'message' | 'ping' | 'pong' | 'error' | 'ack';
+  type: 'message' | 'ping' | 'pong' | 'error' | 'ack' | 'start' | 'chunk' | 'done';
+  text?: string;
   message?: string;
   response?: string;
   message_id?: string;
@@ -23,6 +24,7 @@ export interface WebSocketMessage {
   intent?: string;
   safety_category?: string;
   citations?: any[];
+  requires_human?: boolean;
   error?: string;
   timestamp?: string;
 }

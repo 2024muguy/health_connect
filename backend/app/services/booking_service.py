@@ -39,6 +39,8 @@ class BookingSlots:
     service: Optional[str] = None
     date: Optional[str] = None       # YYYY-MM-DD
     time: Optional[str] = None       # HH:MM
+    location: Optional[str] = None   # "Central" | "Lakeside"
+    contact_method: Optional[str] = None  # "email" | "phone"
     patient_name: Optional[str] = None
     confirmed: bool = False
     attempts: int = 0
@@ -62,13 +64,18 @@ class BookingSlots:
 _EXTRACT_SYSTEM = (
     "Extract appointment slot values from the user's message. Return ONLY "
     "valid JSON with any of these keys that are present:\n"
-    "  service (string), date (YYYY-MM-DD), time (HH:MM 24-hour),\n"
+    "  service (string — pick the closest match from: General, Follow-up, "
+    "Specialist, Laboratory, Imaging, Vaccination, Physical, Consultation, "
+    "Urgent Care, Telehealth),\n"
+    "  date (YYYY-MM-DD), time (HH:MM 24-hour),\n"
+    "  location (Central or Lakeside),\n"
+    "  contact_method (email or phone),\n"
     "  patient_name (string), confirmed (bool)\n"
     "Omit keys not present. No prose, no code fences."
 )
 
 _ASK = {
-    "service": "What kind of appointment would you like? (e.g. General, Dermatology, Laboratory)",
+    "service": "What kind of appointment would you like? (e.g. General, Follow-up, Specialist, Laboratory)",
     "date":    "What date works for you? (YYYY-MM-DD)",
     "time":    "What time works best? (e.g. 09:00 or 14:30)",
     "confirm": "Just to confirm: {service} on {date} at {time}. Shall I book it?",
@@ -104,6 +111,36 @@ class BookingService:
 
     def cancel(self, session_token: str) -> None:
         self._sessions.pop(session_token, None)
+
+    @staticmethod
+    def detect_booking_intent(message: str) -> bool:
+        """Heuristic: does the message read as a booking request?
+
+        Broad trigger set so a wide variety of natural phrasings work:
+          "I want to book", "book me in", "book for me", "make an appointment",
+          "schedule a visit", "reserve a slot", "I'd like to see a doctor",
+          "can you book", "I want to visit ... book", "please book"
+        """
+        if not message:
+            return False
+        m = message.lower()
+
+        strong_phrases = (
+            "book", "booking",
+            "make an appointment", "schedule an appointment",
+            "reserve an appointment", "reserve a slot",
+            "schedule a visit", "book a visit",
+            "make a booking", "arrange an appointment",
+        )
+        if any(p in m for p in strong_phrases):
+            return True
+
+        weak_phrases = ("appointment", "visit", "consultation", "see a doctor", "see a clinician")
+        intent_verbs = ("want", "need", "like", "please", "help")
+        if any(w in m for w in weak_phrases) and any(v in m for v in intent_verbs):
+            return True
+
+        return False
 
     def update_from_message(
         self,
@@ -157,7 +194,9 @@ class BookingService:
             if r.status_code != 200:
                 return self._rule_extract(message)
             content = r.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+            print(f"[BOOKING-LLM] raw: {content[:200]}", flush=True)
             data = self._parse_json(content)
+            print(f"[BOOKING-LLM] parsed: {data}", flush=True)
             return data or self._rule_extract(message)
         except Exception as e:
             logger.warning(f"booking extract failed: {e}")
@@ -165,12 +204,73 @@ class BookingService:
 
     def _rule_extract(self, message: str) -> Dict[str, Any]:
         out: Dict[str, Any] = {}
-        m = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", message)
-        if m: out["date"] = m.group(1)
-        m = re.search(r"\b([01]\d|2[0-3]):([0-5]\d)\b", message)
-        if m: out["time"] = f"{m.group(1)}:{m.group(2)}"
+        m = message.lower()
+
+        # explicit date YYYY-MM-DD
+        m_date = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", message)
+        if m_date:
+            out["date"] = m_date.group(1)
+
+        # natural weekday ("saturday", "next monday") -> next occurrence
+        if "date" not in out:
+            weekdays = {
+                "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+                "friday": 4, "saturday": 5, "sunday": 6,
+            }
+            for name, target_wd in weekdays.items():
+                if name in m:
+                    from datetime import date as _date, timedelta as _td
+                    today = _date.today()
+                    days_ahead = (target_wd - today.weekday() + 7) % 7 or 7
+                    out["date"] = (today + _td(days=days_ahead)).isoformat()
+                    break
+
+        # explicit time HH:MM
+        m_time = re.search(r"\b([01]\d|2[0-3]):([0-5]\d)\b", message)
+        if m_time:
+            out["time"] = f"{m_time.group(1)}:{m_time.group(2)}"
+
+        # natural time like "11 am" / "3 pm"
+        m_ampm = re.search(r"\b(\d{1,2})\s*(am|pm)\b", m)
+        if m_ampm and "time" not in out:
+            hour = int(m_ampm.group(1))
+            if m_ampm.group(2) == "pm" and hour < 12:
+                hour += 12
+            if m_ampm.group(2) == "am" and hour == 12:
+                hour = 0
+            out["time"] = f"{hour:02d}:00"
+
+        # service keywords
+        service_map = [
+            ("follow-up", "Follow-up"), ("follow up", "Follow-up"),
+            ("general", "General"), ("specialist", "Specialist"),
+            ("lab", "Laboratory"), ("laboratory", "Laboratory"),
+            ("imaging", "Imaging"), ("scan", "Imaging"),
+            ("vaccin", "Vaccination"), ("physical", "Physical"),
+            ("consult", "Consultation"), ("urgent", "Urgent Care"),
+            ("tele", "Telehealth"), ("virtual", "Telehealth"),
+        ]
+        for kw, svc in service_map:
+            if kw in m:
+                out["service"] = svc
+                break
+
+        # location
+        if "lakeside" in m:
+            out["location"] = "Lakeside"
+        elif "central" in m:
+            out["location"] = "Central"
+
+        # contact
+        if "email" in m:
+            out["contact_method"] = "email"
+        elif "phone" in m or "call" in m or "sms" in m:
+            out["contact_method"] = "phone"
+
+        # confirmation
         if re.search(r"\b(yes|confirm|book it|go ahead|sure)\b", message, re.I):
             out["confirmed"] = True
+
         return out
 
     def _parse_json(self, text: str) -> Optional[Dict[str, Any]]:

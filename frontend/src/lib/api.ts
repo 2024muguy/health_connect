@@ -50,6 +50,71 @@ export const authApi = {
 // Chat API
 // ============================================
 export const chatApi = {
+  /**
+   * Stream a chat response token-by-token via SSE.
+   * Returns an async iterator of frames.
+   */
+  sendMessageStream: async function* (payload: {
+    message: string;
+    conversation_id?: string;
+    session_token?: string;
+  }): AsyncGenerator<{ type: string; text?: string; [key: string]: unknown }> {
+    const { getAccessToken } = await import('@/lib/api-client');
+    const token = getAccessToken();
+
+    const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
+    console.log('[SSE] fetch →', `${API_BASE}/chat/message/stream`);
+    const res = await fetch(`${API_BASE}/chat/message/stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok || !res.body) {
+      yield { type: 'error', error: `HTTP ${res.status}` };
+      return;
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    console.log('[SSE] reader acquired, starting read loop');
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) {
+        console.log('[SSE] reader done, buffer remainder:', buffer.length);
+        break;
+      }
+      const decoded = decoder.decode(value, { stream: true });
+      console.log('[SSE] raw chunk:', JSON.stringify(decoded.slice(0, 80)));
+      buffer += decoded;
+
+      const frames = buffer.split('\n\n');
+      buffer = frames.pop() ?? '';
+      console.log('[SSE] frames parsed:', frames.length);
+
+      for (const frame of frames) {
+        const line = frame.split('\n').find((l) => l.startsWith('data: '));
+        if (!line) {
+          console.log('[SSE] no data line in frame:', JSON.stringify(frame.slice(0, 60)));
+          continue;
+        }
+        try {
+          const json = JSON.parse(line.slice(6));
+          console.log('[SSE] yielding frame type:', json.type);
+          yield json;
+        } catch (e) {
+          console.log('[SSE] parse error:', e);
+        }
+      }
+    }
+  },
+
   sendMessage: (data: ChatRequest) =>
     apiClient.post<ChatResponse>(API_ENDPOINTS.CHAT.MESSAGE, data),
 

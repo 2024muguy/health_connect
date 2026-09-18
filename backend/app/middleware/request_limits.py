@@ -45,8 +45,15 @@ class RequestLimitsMiddleware(BaseHTTPMiddleware):
                 detail="Request body too large",
             )
 
-        # Rate limit
-        limit = CHAT_RATE_MAX_REQUESTS if "/chat/message" in path else RATE_MAX_REQUESTS
+        # Streaming endpoints are long-lived — skip rate limiting
+        if "/chat/message/stream" in path or "/ws/" in path:
+            return await call_next(request)
+
+        # Rate limit (regular endpoints)
+        if "/chat/message" in path:
+            limit = CHAT_RATE_MAX_REQUESTS
+        else:
+            limit = RATE_MAX_REQUESTS
         if self._rate_limited(ip, limit):
             logger.warning(f"Rate limit exceeded for {ip} on {path}")
             raise HTTPException(

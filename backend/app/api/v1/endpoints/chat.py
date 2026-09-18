@@ -346,8 +346,11 @@ async def send_message_stream(
                 "citations": result.get("citations", []),
             })
         except Exception as e:
-            logger.warning(f"SSE stream failed: {e}")
-            yield _sse({"type": "error", "error": str(e)})
+            logger.warning(f"SSE stream failed: {e}", exc_info=True)
+            try:
+                yield _sse({"type": "error", "error": str(e)})
+            except Exception:
+                pass
 
     return StreamingResponse(
         event_source(),

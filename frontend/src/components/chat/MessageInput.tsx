@@ -16,6 +16,8 @@ interface MessageInputProps {
   placeholder?: string;
   textareaRef?: RefObject<HTMLTextAreaElement>;
   className?: string;
+  /** Slot for a streaming toggle or other left-side controls */
+  headerSlot?: React.ReactNode;
 }
 
 export function MessageInput({
@@ -24,6 +26,7 @@ export function MessageInput({
   placeholder = 'Write a message…',
   textareaRef,
   className,
+  headerSlot,
 }: MessageInputProps) {
   const [message, setMessage] = useState('');
   const [isComposing, setIsComposing] = useState(false);
@@ -55,6 +58,11 @@ export function MessageInput({
 
   return (
     <div className={cn('chat-composer px-5 pb-4', className)}>
+      {headerSlot && (
+        <div className="flex items-center justify-end gap-2 mb-1.5">
+          {headerSlot}
+        </div>
+      )}
       <textarea
         ref={textareaRef}
         data-testid="textarea-chat-message"

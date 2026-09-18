@@ -8,6 +8,7 @@
 import { Sparkles, FileText } from 'lucide-react';
 import type { ChatMessage } from '@/types';
 import { cn, formatTime } from '@/lib/utils';
+import { MessageMeta } from './MessageMeta';
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -35,19 +36,20 @@ export function MessageBubble({ message, isStreaming = false, className }: Messa
       </div>
 
       <div className="min-w-0">
-        <div
-          className={cn(
-            'message-content',
-            isStreaming && 'animate-pulse',
-          )}
-        >
+        <div className="message-content">
           {message.content}
-          {isStreaming && <span className="inline-block w-1.5 h-4 bg-current ml-0.5 animate-pulse" />}
+          {isStreaming && (
+            <span className="inline-block w-[2px] h-4 ml-0.5 align-middle bg-current animate-pulse" />
+          )}
         </div>
 
-        <span className="message-time">
-          {formatTime(message.timestamp)}
-        </span>
+        <div className="flex items-center gap-2 mt-1">
+          <span className="message-time">
+            {formatTime(message.timestamp ?? message.createdAt)}
+          </span>
+        </div>
+
+        {isAssistant && <MessageMeta message={message as any} />}
 
         {process.env.NODE_ENV === 'development' && false && citations.length > 0 && (
           <div className="citations">

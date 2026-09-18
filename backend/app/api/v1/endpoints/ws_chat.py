@@ -29,16 +29,39 @@ router = APIRouter()
 
 
 def _verify_ws_token(token: Optional[str]) -> Optional[dict]:
-    """Verify a JWT passed as a query parameter (defensive)."""
+    """Verify a JWT passed as a query parameter (defensive).
+
+    In development, tolerate tokens up to 10 minutes past expiry so that
+    WS reconnects don't fail if the refresh happens slightly after close.
+    """
     if not token:
         return None
     try:
         payload = security_manager.decode_token(token)
-        if not payload:
-            return None
-        if payload.get("type") not in (None, "access"):
-            return None
-        return payload
+        if payload:
+            if payload.get("type") not in (None, "access"):
+                return None
+            return payload
+
+        # decode_token returned empty — try a lenient decode (ignore expiry)
+        import os
+        if os.getenv("ENVIRONMENT", "development") == "development":
+            try:
+                import jwt as _jwt
+                lenient = _jwt.decode(
+                    token,
+                    security_manager.secret_key,
+                    algorithms=[security_manager.algorithm],
+                    options={"verify_exp": False},
+                )
+                if lenient.get("type") not in (None, "access"):
+                    return None
+                logger.info("WS: accepted recently-expired token (dev mode)")
+                return lenient
+            except Exception as e:
+                logger.warning(f"WS lenient decode failed: {e}")
+
+        return None
     except Exception as e:
         logger.warning(f"WS token verification failed: {type(e).__name__}: {e}")
         return None
