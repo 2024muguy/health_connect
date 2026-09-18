@@ -125,6 +125,31 @@ class ChatService:
     # Database Persistence Helpers
     # ============================================
 
+
+    @staticmethod
+    def _map_service(service: str) -> str:
+        """Map a human service name to the backend appointment_type enum."""
+        s = (service or "").lower()
+        if any(k in s for k in ("dermat", "cardio", "neuro", "ortho", "special")):
+            return "specialist"
+        if any(k in s for k in ("lab", "blood", "test")):
+            return "lab"
+        if any(k in s for k in ("imag", "mri", "xray", "x-ray", "ct", "scan")):
+            return "imaging"
+        if any(k in s for k in ("vaccin", "immuniz")):
+            return "vaccination"
+        if any(k in s for k in ("physical", "check")):
+            return "physical"
+        if any(k in s for k in ("consult", "internal", "medicine", "pediat", "gyn")):
+            return "consultation"
+        if any(k in s for k in ("urgent", "emergency")):
+            return "urgent_care"
+        if any(k in s for k in ("tele", "virtual", "online")):
+            return "telehealth"
+        if any(k in s for k in ("general", "outpatient", "primary")):
+            return "general"
+        return "general"
+
     async def _ensure_conversation_db(self, conversation_code: str, session_token=None, user_id=None) -> str:
         """Ensure a Conversation row exists in the DB and return its UUID."""
         import uuid
@@ -264,9 +289,21 @@ class ChatService:
 
         # ---- Hybrid conversational booking interception ----
         if booking_service.enabled and session_token:
+            logger.info(
+                f"[BOOKING] enabled={booking_service.enabled} "
+                f"session={session_token[:20]}... "
+                f"is_active={booking_service.is_active(session_token)} "
+                f"message={message[:40]!r}"
+            )
             try:
                 if booking_service.is_active(session_token):
                     slots = booking_service.update_from_message(session_token, message)
+                    logger.info(
+                        f"[BOOKING] slots service={slots.service} "
+                        f"date={slots.date} time={slots.time} "
+                        f"confirmed={slots.confirmed} "
+                        f"ready={booking_service.ready_to_book(slots)}"
+                    )
                     if booking_service.ready_to_book(slots):
                         # Confirm + call the actual booking tool
                         from app.services.tool_registry import tool_registry
@@ -327,7 +364,7 @@ class ChatService:
                         "requires_human": False,
                     }
             except Exception as e:
-                logger.warning(f"booking interception failed: {e}")
+                logger.warning(f"booking interception failed: {e}", exc_info=True)
 
         # Get or create conversation.
         # Priority: explicit conversation_id -> existing session_token -> new

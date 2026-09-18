@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import json
 import re
-import time
 import uuid
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
@@ -43,7 +42,7 @@ class BookingSlots:
     patient_name: Optional[str] = None
     confirmed: bool = False
     attempts: int = 0
-    created_at: float = field(default_factory=time.time)
+    created_at: float = field(default_factory=lambda: datetime.now().timestamp())
 
     def missing(self) -> list[str]:
         m = []

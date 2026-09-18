@@ -79,7 +79,23 @@ class UncertaintyService:
 
         confidence = self._combine(retrieval_score, judge_score)
 
-        gated = confidence < self.min_judge and retrieval_score < self.min_retrieval
+        # Fail-open policy:
+        #   - If the judge call failed, do NOT gate (we can't be sure).
+        #   - Gate only when BOTH signals are low AND retrieval is empty-ish.
+        #   - Also skip gating for very short/greeting responses.
+        is_greeting = len(response_text) < 60 and any(
+            w in (query or "").lower()
+            for w in ("hi", "hello", "hey", "my name", "i am", "i'm")
+        )
+        has_real_retrieval = bool(retrieved_chunks) and retrieval_score >= 0.30
+
+        gated = (
+            not is_greeting
+            and judge_score is not None
+            and judge_score < self.min_judge
+            and retrieval_score < self.min_retrieval
+            and not has_real_retrieval
+        )
 
         return {
             "response": self.template if gated else response_text,
@@ -139,6 +155,7 @@ class UncertaintyService:
             )
             if r.status_code != 200:
                 return None
+            r.encoding = "utf-8"
             content = r.json().get("choices", [{}])[0].get("message", {}).get("content", "")
             return self._parse(content)
         except Exception as e:

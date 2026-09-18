@@ -27,23 +27,102 @@ router = APIRouter()
 
 
 def _clean_text(text: str) -> str:
-    """Fix common mojibake and normalize punctuation."""
+    """Fix mojibake from UTF-8 being misread as CP1252 and normalize."""
     if not text:
         return text
+
+    # The mojibake triples we see are each 3 Python chars:
+    #   0x00e2 (a-circumflex) + 0x20ac (euro) + one of {0x00a2, 0x00af, ...}
+    # We replace each with the intended UTF-8 character.
+    fixes = [
+        ("\u00e2\u20ac\u00a2", "\u2022"),   # bullet
+        ("\u00e2\u20ac\u00af", " "),         # narrow no-break space
+        ("\u00e2\u20ac\u00a0", " "),         # non-breaking space
+        ("\u00e2\u20ac\u02dc", "\u2018"),   # left single quote
+        ("\u00e2\u20ac\u2122", "\u2019"),   # right single quote
+        ("\u00e2\u20ac\u0153", "\u201c"),   # left double quote
+        ("\u00e2\u20ac\u009d", "\u201d"),   # right double quote
+        ("\u00e2\u20ac\u201c", "\u2013"),   # en dash
+        ("\u00e2\u20ac\u201d", "\u2014"),   # em dash
+        ("\u00e2\u20ac\u2018", "\u2011"),   # non-breaking hyphen
+        ("\u00e2\u20ac\u00a6", "\u2026"),   # ellipsis
+        ("\u00c3\u00a9", "\u00e9"),
+        ("\u00c3\u00a8", "\u00e8"),
+    ]
+    for bad, good in fixes:
+        text = text.replace(bad, good)
+
+    # Aggressive fallback: any remaining 0x00e2 0x20ac X sequence is garbage.
+    import re as _re
+    text = _re.sub("\u00e2\u20ac[\u0080-\u00ff]", "", text)
+
+    # Strip zero-width and control chars
+    text = "".join(ch for ch in text if ch in "\n\t" or ord(ch) >= 32)
+    text = _re.sub(r" {3,}", "  ", text)
+    return text
+
+
+    # Aggressive first pass: strip any 3-char sequence that starts with 0x00e2
+    # followed by 0x20ac (UTF-8 Euro sign) and any byte in 0x80-0xff range.
+    # This is the mojibake family we see from CP1252-misdecoded UTF-8.
+    import re as _re
+    text = _re.sub(r"\u00e2\u20ac[\u0080-\u00ff]", "", text)
+    text = text.replace("\u00c3\u00a9", "\u00e9").replace("\u00c3\u00a8", "\u00e8")
+    # CP1252-misread-UTF-8 triples (each is exactly 3 characters, e.g. "a with circumflex" + "euro sign" + "bullet")
     replacements = {
-        '\u00e2\u20ac\u2018': "'",   # ' (left single quote)
-        '\u00e2\u20ac\u2019': "'",   # ' (right single quote)
-        '\u00e2\u20ac\u201c': '"',   # " (left double)
-        '\u00e2\u20ac\u009d': '"',   # " (right double)
-        '\u00e2\u20ac\u2013': '\u2013',   # en dash
-        '\u00e2\u20ac\u2014': '\u2014',   # em dash
-        '\u00c3\u00a9': 'é',
-        '\u00c3\u00a8': 'è',
+        # bullet: 'â€¢'  (0x00e2 0x20ac 0x00a2)
+        "\u00e2\u20ac\u00a2": "\u2022",
+        # narrow no-break space: 'â€¯'  (0x00e2 0x20ac 0x00af)
+        "\u00e2\u20ac\u00af": " ",
+        # non-breaking space: 'â€ '  (0x00e2 0x20ac 0x00a0)
+        "\u00e2\u20ac\u00a0": " ",
+        # left single quote: 'â€˜'
+        "\u00e2\u20ac\u02dc": "\u2018",
+        # right single quote: 'â€™'
+        "\u00e2\u20ac\u2122": "\u2019",
+        # left double quote: 'â€œ'
+        "\u00e2\u20ac\u0153": "\u201c",
+        # right double quote: 'â€\x9d'
+        "\u00e2\u20ac\u009d": "\u201d",
+        # en dash: 'â€“'
+        "\u00e2\u20ac\u201c": "\u2013",
+        # em dash: 'â€”'
+        "\u00e2\u20ac\u201d": "\u2014",
+        # non-breaking hyphen: 'â€‘'
+        "\u00e2\u20ac\u2018": "\u2011",
+        # ellipsis: 'â€¦'
+        "\u00e2\u20ac\u00a6": "\u2026",
+        # é
+        "\u00c3\u00a9": "\u00e9",
+        # è
+        "\u00c3\u00a8": "\u00e8",
     }
     for bad, good in replacements.items():
         text = text.replace(bad, good)
+    # Fix specific UTF-8-mojibake triples (do this BEFORE the general strip)
+    SPECIFIC = {
+        "\u00e2\u20ac\u00af": " ",       # '\u00e2\u20ac\u00af' -> narrow space -> normal space
+        "\u00e2\u20ac\u00a0": " ",
+        "\u00e2\u20ac\u2019": "'",
+        "\u00e2\u20ac\u2018": "'",
+        "\u00e2\u20ac\u201c": '"',
+        "\u00e2\u20ac\u009d": '"',
+        "\u00e2\u20ac\u2013": "-",
+        "\u00e2\u20ac\u2014": "-",
+        "\u00e2\u20ac\u00a6": "...",
+        "\u00c3\u00a9": "e",
+        "\u00c3\u00a8": "e",
+    }
+    for bad, good in SPECIFIC.items():
+        text = text.replace(bad, good)
+
     # Replace any remaining non-printable control chars
     text = ''.join(ch for ch in text if ch == '\n' or ch == '\t' or ord(ch) >= 32)
+    # Final mojibake catch-all: remove any lingering "\u00e2\u20ac" family
+    import re as _re
+    text = _re.sub(r"\u00e2\u20ac[\u0080-\u20ff]", "", text)
+    # Collapse repeated spaces (but keep newlines)
+    text = _re.sub(r" {3,}", "  ", text)
     return text
 
 
@@ -147,6 +226,8 @@ async def send_message(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to process message",
         )
+        response_text = _clean_text(response_text)
+
 
 
 # ============================================

@@ -85,10 +85,16 @@ class AppointmentService:
             )
             at_enum = AppointmentTypeEnum.GENERAL
 
+
+        # ---- Coerce string IDs to UUID objects ----
+        import uuid as _uuid
+        pid = _uuid.UUID(patient_id) if isinstance(patient_id, str) else patient_id
+        did = None
+
         row = Appointment(
             id=uuid.uuid4(),                 # UUID object, not str
             appointment_code=appointment_code,
-            patient_id=patient_id,           # pass through as-is; SQLAlchemy will coerce
+            patient_id=pid,           # pass through as-is; SQLAlchemy will coerce
             appointment_type=at_enum,
             status=AppointmentStatusEnum.SCHEDULED,
             scheduled_datetime=scheduled_datetime,

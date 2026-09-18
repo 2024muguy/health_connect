@@ -257,6 +257,7 @@ Be concise and helpful."""
             )
             
             if response.status_code == 200:
+                response.encoding = "utf-8"
                 result = response.json()
                 content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
 
