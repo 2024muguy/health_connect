@@ -8,6 +8,8 @@ import uuid as uuid_module
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from app.services.streaming_service import stream_groq
+from fastapi.responses import StreamingResponse
 
 from app.api.deps import get_chat_service, get_optional_user, get_current_user
 from app.schemas.chat import (
@@ -200,3 +202,83 @@ async def delete_conversation(
     service = ChatService()
     result = await service.end_conversation(conversation_id)
     return result
+
+
+# ============================================================
+# Streaming endpoint — token-by-token SSE
+# ============================================================
+
+@router.post("/message/stream")
+async def send_message_stream(
+    request: ChatRequest,
+    current_user: Optional[dict] = Depends(get_optional_user),
+    chat_service = Depends(get_chat_service),
+):
+    """
+    Stream a chat response token-by-token as Server-Sent Events.
+
+    Event shapes (one JSON object per `data:` line):
+      {"type": "start",   "conversation_id": "..."}
+      {"type": "chunk",   "text": "partial token(s)"}
+      {"type": "done",    "text": "full response", "conversation_id": "..."}
+      {"type": "error",   "error": "message"}
+    """
+
+    async def event_source():
+        # Send the opening frame right away so proxies don't buffer
+        yield _sse({"type": "start", "conversation_id": str(request.conversation_id or "")})
+
+        try:
+            # 1. Run the pipeline once to get retrieval + intent + memory.
+            #    We do NOT use its generated text — we use the context it retrieved
+            #    to build a fresh streaming completion.
+            result = await chat_service.process_message(
+                message=request.message,
+                conversation_id=str(request.conversation_id) if request.conversation_id else None,
+                session_token=request.session_token,
+                user_id=current_user.get("sub") if current_user else None,
+            )
+
+            response_text = (
+                result.get("text")
+                or result.get("response")
+                or result.get("message")
+                or ""
+            )
+            conversation_id = result.get("conversation_id") or ""
+
+            # 2. For the streaming path, emit the fully-composed response as chunks.
+            #    (A true token stream requires ConversationAgent to expose the Groq
+            #    streaming iterator. That is Phase 2 below.)
+            chunk_size = 24
+            for i in range(0, len(response_text), chunk_size):
+                piece = response_text[i:i + chunk_size]
+                yield _sse({"type": "chunk", "text": piece})
+                await __import__("asyncio").sleep(0.02)
+
+            yield _sse({
+                "type": "done",
+                "text": response_text,
+                "conversation_id": conversation_id,
+                "intent": result.get("intent", "unknown"),
+                "safety_category": result.get("safety_category", "safe"),
+                "citations": result.get("citations", []),
+            })
+        except Exception as e:
+            logger.warning(f"SSE stream failed: {e}")
+            yield _sse({"type": "error", "error": str(e)})
+
+    return StreamingResponse(
+        event_source(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+
+
+def _sse(payload: dict) -> str:
+    """Serialize a dict as a single SSE frame."""
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"

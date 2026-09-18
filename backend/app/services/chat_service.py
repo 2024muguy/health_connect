@@ -28,6 +28,8 @@ logger = get_logger(__name__)
 from app.services.input_guard import guard_message  # noqa: E402
 from app.services.audit_log import audit  # noqa: E402
 from app.services.memory_service import memory_service  # noqa: E402
+from app.services.uncertainty_service import uncertainty_service  # noqa: E402
+from app.services.booking_service import booking_service  # noqa: E402
 
 
 # ============================================
@@ -260,6 +262,73 @@ class ChatService:
             }
         message = guard.sanitized or message
 
+        # ---- Hybrid conversational booking interception ----
+        if booking_service.enabled and session_token:
+            try:
+                if booking_service.is_active(session_token):
+                    slots = booking_service.update_from_message(session_token, message)
+                    if booking_service.ready_to_book(slots):
+                        # Confirm + call the actual booking tool
+                        from app.services.tool_registry import tool_registry
+                        result = await tool_registry.call(
+                            "create_appointment",
+                            patient_id="237bde9c-ca35-46d1-8dcf-edb861583a98",
+                            appointment_type=self._map_service(slots.service),
+                            scheduled_datetime=f"{slots.date}T{slots.time}:00",
+                            duration_minutes=30,
+                            reason=slots.service,
+                        )
+                        booking_service.cancel(session_token)
+                        if result.get("ok"):
+                            apt = result["result"]
+                            text = (
+                                f"All set! I've booked your {slots.service} appointment "
+                                f"on {slots.date} at {slots.time}. "
+                                f"Your appointment code is {apt.get('appointment_code')}."
+                            )
+                        else:
+                            text = (
+                                "I couldn't complete the booking automatically. "
+                                "Let me connect you with a staff member who can finish it."
+                            )
+                        return {
+                            "conversation_id": "",
+                            "text": text,
+                            "message": text,
+                            "response": text,
+                            "intent": "appointment_booking",
+                            "requires_human": not result.get("ok"),
+                            "booking_completed": result.get("ok", False),
+                        }
+                    else:
+                        # Ask for the next missing slot
+                        prompt = booking_service.next_prompt(slots)
+                        return {
+                            "conversation_id": "",
+                            "text": prompt,
+                            "message": prompt,
+                            "response": prompt,
+                            "intent": "appointment_booking",
+                            "requires_human": False,
+                        }
+                elif any(k in message.lower() for k in (
+                    "book an appointment", "make an appointment",
+                    "schedule an appointment", "i want to book",
+                )):
+                    booking_service.start(session_token)
+                    slots = booking_service.update_from_message(session_token, message)
+                    prompt = booking_service.next_prompt(slots)
+                    return {
+                        "conversation_id": "",
+                        "text": prompt,
+                        "message": prompt,
+                        "response": prompt,
+                        "intent": "appointment_booking",
+                        "requires_human": False,
+                    }
+            except Exception as e:
+                logger.warning(f"booking interception failed: {e}")
+
         # Get or create conversation.
         # Priority: explicit conversation_id -> existing session_token -> new
         if conversation_id:
@@ -371,6 +440,36 @@ class ChatService:
 
         # Belt-and-braces: scrub any leaked KB content before returning
         response_text = _scrub_response(response_text, query=message)
+
+        # Uncertainty gate — replaces low-confidence responses with a safe template
+        gate = uncertainty_service.score_and_gate(
+            response_text=response_text,
+            query=message,
+            retrieved_chunks=result.output.get("retrieved_chunks", []) or [],
+        )
+        if gate.get("gated"):
+            logger.info(
+                f"Uncertainty gate triggered: "
+                f"confidence={gate.get('confidence')} "
+                f"retrieval={gate.get('retrieval_score')} "
+                f"judge={gate.get('judge_score')}"
+            )
+        response_text = gate["response"]
+
+        # Uncertainty gate — replaces low-confidence responses with a safe template
+        gate = uncertainty_service.score_and_gate(
+            response_text=response_text,
+            query=message,
+            retrieved_chunks=result.output.get("retrieved_chunks", []) or [],
+        )
+        if gate.get("gated"):
+            logger.info(
+                f"Uncertainty gate triggered: "
+                f"confidence={gate.get('confidence')} "
+                f"retrieval={gate.get('retrieval_score')} "
+                f"judge={gate.get('judge_score')}"
+            )
+        response_text = gate["response"]
         
         # Build response with BOTH "text" and "message" keys for compatibility
         response = {
@@ -386,6 +485,10 @@ class ChatService:
             "citations": result.output.get("citations", []),
             "action_performed": result.output.get("action_performed"),
             "processing_time_ms": result.execution_time_ms,
+            "confidence": gate.get("confidence"),
+            "retrieval_score": gate.get("retrieval_score"),
+            "judge_score": gate.get("judge_score"),
+            "uncertainty_gated": gate.get("gated", False),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         
