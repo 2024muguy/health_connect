@@ -186,7 +186,7 @@ class BookingService:
                         {"role": "system", "content": _EXTRACT_SYSTEM},
                         {"role": "user", "content": message},
                     ],
-                    "max_tokens": 150,
+                    "max_tokens": 400,   # Week 8: was 150, too small for multi-field JSON
                     "temperature": 0.0,
                 },
                 timeout=15,

@@ -23,6 +23,7 @@ from app.rag.vector_store import VectorStoreManager
 
 from config.settings import get_settings
 from config.logging_config import get_logger
+from app.services.reranker_service import reranker_service
 
 logger = get_logger(__name__)
 settings = get_settings()
@@ -95,7 +96,13 @@ class HybridRetriever:
         elif retrieval_method == "keyword":
             return await self._keyword_search(query, top_k)
         elif retrieval_method == "hybrid":
-            return await self._hybrid_search(query, top_k, filters)
+            # Retrieve more candidates, then rerank
+            candidates = await self._hybrid_search(
+                query, settings.rag.RERANKER_TOP_K, filters
+            )
+            return reranker_service.rerank(
+                query, candidates, keep=settings.rag.RERANKER_KEEP
+            )
         else:
             raise ValueError(f"Unknown retrieval method: {retrieval_method}")
     
@@ -250,13 +257,37 @@ class HybridRetriever:
         # Sort by RRF score
         sorted_results = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)
         
+        # Normalize RRF scores to [0, 1] BUT keep an absolute signal:
+        #   - A query with strong matches (many hits, deep overlap) should
+        #     produce high scores.
+        #   - A query with only one weak match should produce lower scores.
+        # RRF scores live in [~0.008, ~0.03]. We scale to [0, 1] using a
+        # fixed reference point, so absolute quality is preserved.
+        #
+        # Reference: a "perfect" query hits rank 1 in both vector and keyword,
+        # giving rrf = alpha/(k+1) + (1-alpha)/(k+1) = 1/(k+1) ~ 0.0164 (k=60).
+        # We use 2 * (k+1) as the reference so a perfect query ~ 0.5, and add
+        # a hit-count boost.
+        n_hits = len(sorted_results)
+        hit_boost = min(1.0, n_hits / 10.0)  # more candidates → more confident
+
         # Build final results
         final_results = []
         for chunk_id, rrf_score in sorted_results[:top_k]:
             result = result_map[chunk_id]
-            result.score = rrf_score
+            # Raw RRF scaled by reference (values roughly in [0, 1])
+            ref = 1.0 / (self.rrf_constant + 1)  # ~0.0164
+            raw_norm = min(1.0, rrf_score / (2 * ref))
+            # Blend with hit count so single-hit queries score lower
+            result.score = round(0.7 * raw_norm + 0.3 * hit_boost, 4)
             result.retrieval_method = "hybrid"
             final_results.append(result)
+        
+        if final_results:
+            logger.debug(
+                f"RRF normalized: top={final_results[0].score:.3f}, "
+                f"min={final_results[-1].score:.3f}"
+            )
         
         return final_results
     

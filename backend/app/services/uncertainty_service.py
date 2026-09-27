@@ -89,13 +89,23 @@ class UncertaintyService:
         )
         has_real_retrieval = bool(retrieved_chunks) and retrieval_score >= 0.30
 
-        gated = (
-            not is_greeting
-            and judge_score is not None
-            and judge_score < self.min_judge
-            and retrieval_score < self.min_retrieval
-            and not has_real_retrieval
-        )
+        # Gate policy:
+        #   - judge available → require BOTH signals below threshold
+        #   - judge missing   → fall back to retrieval-only, but only when
+        #                       retrieval actually returned *something*
+        # Fail-open: never gate on empty retrieval (KB boundary already handles it)
+        if judge_score is not None:
+            gated = (
+                not is_greeting
+                and judge_score < self.min_judge
+                and retrieval_score < self.min_retrieval
+                and not has_real_retrieval
+            )
+        else:
+            gated = (
+                not is_greeting
+                and 0.0 < retrieval_score < self.min_retrieval
+            )
 
         return {
             "response": self.template if gated else response_text,

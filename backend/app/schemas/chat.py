@@ -88,6 +88,11 @@ class ChatResponse(BaseModel):
     citations: List[Dict[str, str]] = Field(default_factory=list, description="Source citations")
     timestamp: datetime = Field(default_factory=datetime.utcnow, description="Response timestamp")
     processing_time_ms: float = Field(..., description="Processing time in milliseconds")
+    # Week 8: uncertainty gate fields
+    confidence: Optional[float] = Field(default=None, description="Combined confidence score")
+    retrieval_score: Optional[float] = Field(default=None, description="Max retrieval similarity")
+    judge_score: Optional[float] = Field(default=None, description="LLM judge score")
+    uncertainty_gated: bool = Field(default=False, description="Whether the uncertainty gate fired")
 
 
 class MessageSchema(BaseModel):

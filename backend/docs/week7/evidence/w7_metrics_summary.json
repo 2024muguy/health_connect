@@ -1,0 +1,33 @@
+{
+  "generated_at": "2026-09-20T09:57:54Z",
+  "kb": {
+    "original_chunks": 43,
+    "cleaned_chunks": 12,
+    "reduction_pct": 72.1
+  },
+  "features": {
+    "memory": "working",
+    "streaming_sse": "working",
+    "conversational_booking": "working",
+    "escalation_short_circuit": "working",
+    "tool_registry_tools": 4,
+    "safety_layers": 7
+  },
+  "escalation_phrasings": [
+    "connect me",
+    "connecting me",
+    "put me in touch",
+    "speak to a human",
+    "talk to someone",
+    "real person",
+    "escalate",
+    "why arent you connecting me"
+  ],
+  "verification": {
+    "memory_recall_test": "PASS — name + allergy persisted across turns",
+    "booking_e2e_test": "PASS — APT code created in DB",
+    "escalation_state_test": "PASS — 6-turn flow, no pollution",
+    "injection_defense": "PASS — 7/7 patterns blocked",
+    "sse_streaming": "PASS — chunk-by-chunk verified via curl + browser"
+  }
+}

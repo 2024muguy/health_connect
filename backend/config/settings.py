@@ -170,6 +170,13 @@ class RAGSettings(BaseSettings):
         return self.CHUNK_SIZE - self.CHUNK_OVERLAP
 
 
+
+    # Week 8: Cross-encoder reranker
+    RERANKER_ENABLED: bool = Field(default=True)
+    RERANKER_TOP_K: int = Field(default=20, description="Candidates from retrieval")
+    RERANKER_KEEP: int = Field(default=5, description="Top results after rerank")
+    RERANKER_MODEL: str = Field(default="cross-encoder/ms-marco-MiniLM-L-6-v2")
+
 class SafetySettings(BaseSettings):
     """Safety Framework configuration settings"""
     

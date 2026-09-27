@@ -216,6 +216,11 @@ async def send_message(
             requires_human=bool(response_data.get("requires_human", False)),
             citations=citations,
             processing_time_ms=float(response_data.get("processing_time_ms", 0)),
+            # Week 8: uncertainty gate fields
+            confidence=response_data.get("confidence"),
+            retrieval_score=response_data.get("retrieval_score"),
+            judge_score=response_data.get("judge_score"),
+            uncertainty_gated=bool(response_data.get("uncertainty_gated", False)),
         )
         
         return chat_response

@@ -572,20 +572,6 @@ class ChatService:
             )
         response_text = gate["response"]
 
-        # Uncertainty gate — replaces low-confidence responses with a safe template
-        gate = uncertainty_service.score_and_gate(
-            response_text=response_text,
-            query=message,
-            retrieved_chunks=result.output.get("retrieved_chunks", []) or [],
-        )
-        if gate.get("gated"):
-            logger.info(
-                f"Uncertainty gate triggered: "
-                f"confidence={gate.get('confidence')} "
-                f"retrieval={gate.get('retrieval_score')} "
-                f"judge={gate.get('judge_score')}"
-            )
-        response_text = gate["response"]
         
         # Build response with BOTH "text" and "message" keys for compatibility
         response = {
